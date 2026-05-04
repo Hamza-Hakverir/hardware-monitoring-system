@@ -1,0 +1,56 @@
+{% extends 'monitoring/base.html' %}
+
+{% block title %}Konum Ekle{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center dm-animate">
+    <div class="col-md-7 col-lg-6">
+        <div class="card dm-card">
+            <div class="card-header">
+                <h6><i class="bi bi-geo-alt me-2"></i>Cihaza Konum Atama</h6>
+            </div>
+            <div class="card-body p-4">
+                {% if error %}
+                <div class="alert alert-danger d-flex align-items-center" role="alert">
+                    <i class="bi bi-exclamation-circle me-2"></i>{{ error }}
+                </div>
+                {% endif %}
+
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="device" class="form-label fw-medium">Cihaz Seçin</label>
+                        <select name="device" id="device" class="form-select" required>
+                            <option value="" disabled selected>Bir cihaz seçin...</option>
+                            {% for device in devices %}
+                            <option value="{{ device.mac_address }}">
+                                {{ device.mac_address }} — {{ device.os_info }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="building" class="form-label fw-medium">Bina Adı</label>
+                        <input type="text" name="building" id="building" class="form-control" placeholder="Örn: Mühendislik Fakültesi" required>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-6">
+                            <label for="floor" class="form-label fw-medium">Kat</label>
+                            <input type="text" name="floor" id="floor" class="form-control" placeholder="Örn: 3" required>
+                        </div>
+                        <div class="col-6">
+                            <label for="room" class="form-label fw-medium">Oda</label>
+                            <input type="text" name="room" id="room" class="form-control" placeholder="Örn: Lab-301" required>
+                        </div>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-dm-primary py-2">
+                            <i class="bi bi-check-circle me-1"></i>Konumu Kaydet
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

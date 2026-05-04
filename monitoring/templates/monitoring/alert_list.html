@@ -1,0 +1,120 @@
+{% extends 'monitoring/base.html' %}
+
+{% block title %}Uyarılar{% endblock %}
+
+{% block content %}
+<div class="dm-page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-exclamation-triangle me-2"></i>Uyarı Listesi</h2>
+        <p class="text-muted mb-0">Toplam {{ alerts|length }} uyarı kaydı</p>
+    </div>
+    <div class="d-flex gap-2">
+        <input type="text" id="alertSearch" class="form-control dm-search" placeholder="Uyarı ara...">
+        <a href="{% url 'ui_add_alert' %}" class="btn btn-dm-primary">
+            <i class="bi bi-plus-circle me-1"></i>Yeni
+        </a>
+    </div>
+</div>
+
+<div class="card dm-card dm-animate">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table dm-table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th class="px-4 py-3">Tarih</th>
+                        <th class="py-3">Cihaz</th>
+                        <th class="py-3">Tür</th>
+                        <th class="py-3">Mesaj</th>
+                        <th class="py-3">Durum</th>
+                        <th class="py-3 text-end px-4">İşlem</th>
+                    </tr>
+                </thead>
+                <tbody id="alertTable">
+                    {% for alert in alerts %}
+                    <tr class="alert-row" id="alert-{{ alert.id }}">
+                        <td class="px-4 text-muted">{{ alert.created_at|date:"d M Y H:i:s" }}</td>
+                        <td>
+                            <a href="{% url 'ui_device_detail' pk=alert.device.mac_address %}" class="text-decoration-none fw-medium">
+                                {{ alert.device.mac_address|truncatechars:11 }}
+                            </a>
+                        </td>
+                        <td>
+                            <span class="dm-badge bg-{% if alert.alert_type == 'CPU_HIGH' %}danger{% elif alert.alert_type == 'RAM_HIGH' %}warning text-dark{% elif alert.alert_type == 'DISK_FULL' %}info{% else %}secondary{% endif %}">
+                                {% if alert.alert_type == 'CPU_HIGH' %}<i class="bi bi-cpu me-1"></i>
+                                {% elif alert.alert_type == 'RAM_HIGH' %}<i class="bi bi-memory me-1"></i>
+                                {% elif alert.alert_type == 'DISK_FULL' %}<i class="bi bi-hdd me-1"></i>
+                                {% endif %}
+                                {{ alert.alert_type }}
+                            </span>
+                        </td>
+                        <td>{{ alert.message }}</td>
+                        <td id="status-{{ alert.id }}">
+                            {% if alert.is_resolved %}
+                                <span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>
+                            {% else %}
+                                <span class="dm-badge bg-danger"><i class="bi bi-clock me-1"></i>Beklemede</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end px-4" id="action-{{ alert.id }}">
+                            {% if not alert.is_resolved %}
+                                <button onclick="resolveAlert({{ alert.id }})" class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-check2 me-1"></i>Çözüldü
+                                </button>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center py-5 text-muted">
+                            <i class="bi bi-shield-check" style="font-size: 2.5rem; color: var(--dm-success);"></i>
+                            <br><br>
+                            <strong>Hiç uyarı yok!</strong><br>
+                            Tüm cihazlar sorunsuz çalışıyor.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Arama fonksiyonu
+document.getElementById('alertSearch').addEventListener('input', function() {
+    const query = this.value.toLowerCase();
+    document.querySelectorAll('.alert-row').forEach(row => {
+        row.style.display = row.textContent.toLowerCase().includes(query) ? '' : 'none';
+    });
+});
+
+// AJAX ile uyarıyı çözüldü olarak işaretleme (sayfa yenilemeden)
+function resolveAlert(alertId) {
+    fetch(`/api/monitoring/alerts/${alertId}/resolve/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        }
+    })
+    .then(response => {
+        if (response.ok) {
+            // Durumu güncelle
+            document.getElementById('status-' + alertId).innerHTML =
+                '<span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>';
+            // Butonu kaldır
+            document.getElementById('action-' + alertId).innerHTML =
+                '<span class="text-muted">—</span>';
+            // Satırı hafifçe soluklaştır
+            document.getElementById('alert-' + alertId).style.opacity = '0.6';
+        }
+    })
+    .catch(err => console.error('Hata:', err));
+}
+</script>
+{% endblock %}

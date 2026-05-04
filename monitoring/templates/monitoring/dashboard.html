@@ -1,0 +1,287 @@
+{% extends 'monitoring/base.html' %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block extra_head %}
+<!-- Dashboard JS ile AJAX üzerinden otomatik güncellenir -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<!-- Sayfa Başlığı -->
+<div class="dm-page-header d-flex justify-content-between align-items-center">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
+        <p class="text-muted mb-0"><span class="dm-live-dot me-1"></span> Sistem durumu anlık olarak izlenmektedir</p>
+    </div>
+</div>
+
+<!-- Özet Kartları -->
+<div class="row g-3 mb-4">
+    <div class="col-md-3 dm-animate dm-animate-delay-1">
+        <div class="card dm-stat-card bg-gradient-primary h-100">
+            <div class="card-body">
+                <i class="bi bi-pc-display-horizontal stat-icon"></i>
+                <div class="stat-value" id="valTotal">{{ total_devices }}</div>
+                <div class="stat-label">Toplam Cihaz</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 dm-animate dm-animate-delay-2">
+        <div class="card dm-stat-card bg-gradient-success h-100">
+            <div class="card-body">
+                <i class="bi bi-check-circle stat-icon"></i>
+                <div class="stat-value" id="valActive">{{ active_devices }}</div>
+                <div class="stat-label">Aktif Cihaz</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 dm-animate dm-animate-delay-3">
+        <div class="card dm-stat-card bg-gradient-danger h-100">
+            <div class="card-body">
+                <i class="bi bi-x-circle stat-icon"></i>
+                <div class="stat-value" id="valInactive">{{ inactive_devices }}</div>
+                <div class="stat-label">Pasif Cihaz</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3 dm-animate dm-animate-delay-4">
+        <div class="card dm-stat-card bg-gradient-warning h-100">
+            <div class="card-body">
+                <i class="bi bi-exclamation-triangle stat-icon"></i>
+                <div class="stat-value" id="valUnresolved">{{ unresolved_alerts }}</div>
+                <div class="stat-label">Bekleyen Uyarı</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Grafikler -->
+<div class="row g-3 mb-4">
+    <div class="col-md-5 dm-animate dm-animate-delay-2">
+        <div class="card dm-card h-100">
+            <div class="card-header">
+                <h6><i class="bi bi-pie-chart me-2"></i>Cihaz Durumu Dağılımı</h6>
+            </div>
+            <div class="card-body d-flex align-items-center justify-content-center">
+                <canvas id="deviceStatusChart" style="max-height: 250px;"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-7 dm-animate dm-animate-delay-3">
+        <div class="card dm-card h-100">
+            <div class="card-header">
+                <h6><i class="bi bi-bar-chart me-2"></i>Son Uyarı Türleri</h6>
+            </div>
+            <div class="card-body">
+                <canvas id="alertTypeChart" style="max-height: 250px;"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Son Uyarılar Tablosu -->
+<div class="card dm-card dm-animate dm-animate-delay-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6><i class="bi bi-bell me-2"></i>Son Uyarılar</h6>
+        <a href="{% url 'ui_alert_list' %}" class="btn btn-sm btn-dm-primary">
+            Tümünü Gör <i class="bi bi-arrow-right ms-1"></i>
+        </a>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table dm-table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th class="px-4 py-3">Tarih</th>
+                        <th class="py-3">Cihaz</th>
+                        <th class="py-3">Tür</th>
+                        <th class="py-3">Mesaj</th>
+                        <th class="py-3 px-4">Durum</th>
+                    </tr>
+                </thead>
+                <tbody id="alertsTableBody">
+                    {% for alert in recent_alerts %}
+                    <tr>
+                        <td class="px-4 text-muted">{{ alert.created_at|date:"d M Y H:i:s" }}</td>
+                        <td>
+                            <a href="{% url 'ui_device_detail' pk=alert.device.mac_address %}" class="text-decoration-none fw-medium">
+                                {{ alert.device.mac_address|truncatechars:11 }}
+                            </a>
+                        </td>
+                        <td>
+                            <span class="dm-badge bg-{% if alert.alert_type == 'CPU_HIGH' %}danger{% elif alert.alert_type == 'RAM_HIGH' %}warning text-dark{% elif alert.alert_type == 'DISK_FULL' %}info{% else %}secondary{% endif %}">
+                                {{ alert.alert_type }}
+                            </span>
+                        </td>
+                        <td>{{ alert.message|truncatechars:50 }}</td>
+                        <td class="px-4">
+                            {% if alert.is_resolved %}
+                                <span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>
+                            {% else %}
+                                <span class="dm-badge bg-danger"><i class="bi bi-clock me-1"></i>Beklemede</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5 text-muted">
+                            <i class="bi bi-shield-check" style="font-size: 2.5rem; color: var(--dm-success);"></i>
+                            <br><br>
+                            <strong>Sistem temiz!</strong><br>
+                            Herhangi bir uyarı bulunmamaktadır.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Dashboard Grafik Değişkenleri
+let statusChart, alertChart;
+const activeCount = {{ active_devices|default:0 }};
+const inactiveCount = {{ inactive_devices|default:0 }};
+
+function initCharts() {
+    const statusCtx = document.getElementById('deviceStatusChart');
+    if (activeCount + inactiveCount > 0) {
+        statusChart = new Chart(statusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['Aktif', 'Pasif'],
+                datasets: [{
+                    data: [activeCount, inactiveCount],
+                    backgroundColor: ['#06d6a0', '#ef476f'],
+                    borderWidth: 0,
+                    hoverOffset: 8,
+                }]
+            },
+            options: {
+                responsive: true,
+                cutout: '65%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { padding: 20, font: { family: 'Inter', weight: 600 } } }
+                }
+            }
+        });
+    } else {
+        statusCtx.parentElement.innerHTML = '<p class="text-muted text-center" id="noDeviceMsg">Henüz cihaz kaydı yok</p>';
+    }
+
+    const alertCtx = document.getElementById('alertTypeChart');
+    const alertData = {};
+    {% for alert in recent_alerts %}
+        alertData['{{ alert.alert_type }}'] = (alertData['{{ alert.alert_type }}'] || 0) + 1;
+    {% endfor %}
+    const alertLabels = Object.keys(alertData);
+    const alertValues = Object.values(alertData);
+
+    if (alertLabels.length > 0) {
+        alertChart = new Chart(alertCtx, {
+            type: 'bar',
+            data: {
+                labels: alertLabels,
+                datasets: [{
+                    label: 'Uyarı Sayısı',
+                    data: alertValues,
+                    backgroundColor: ['#ef476f', '#ffd166', '#118ab2', '#06d6a0', '#073b4c'],
+                    borderRadius: 8,
+                    borderSkipped: false,
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                    x: { grid: { display: false } }
+                },
+                plugins: {
+                    legend: { display: false }
+                }
+            }
+        });
+    } else {
+        alertCtx.parentElement.innerHTML = '<p class="text-muted text-center py-5" id="noAlertMsg"><i class="bi bi-bar-chart" style="font-size:2rem;"></i><br><br>Henüz uyarı verisi yok</p>';
+    }
+}
+
+function formatDate(isoString) {
+    const d = new Date(isoString);
+    const months = ['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+    return `${d.getDate().toString().padStart(2,'0')} ${months[d.getMonth()]} ${d.getFullYear()} ${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}:${d.getSeconds().toString().padStart(2,'0')}`;
+}
+
+function getAlertBadgeClass(type) {
+    if (type === 'CPU_HIGH') return 'danger';
+    if (type === 'RAM_HIGH') return 'warning text-dark';
+    if (type === 'DISK_FULL') return 'info';
+    return 'secondary';
+}
+
+function refreshDashboard() {
+    fetch('/api/monitoring/dashboard/stats/')
+    .then(r => r.json())
+    .then(data => {
+        // 1. Kartları Güncelle
+        document.getElementById('valTotal').textContent = data.total_devices;
+        document.getElementById('valActive').textContent = data.active_devices;
+        document.getElementById('valInactive').textContent = data.inactive_devices;
+        document.getElementById('valUnresolved').textContent = data.unresolved_alerts;
+
+        // 2. Pasta Grafiğini Güncelle
+        if (statusChart) {
+            statusChart.data.datasets[0].data = [data.active_devices, data.inactive_devices];
+            statusChart.update('none');
+        } else if (data.active_devices + data.inactive_devices > 0) {
+            // Sayfa açıldığında hiç cihaz yoksa ve sonradan eklendiyse, sayfayı yenilemek en iyisi (basit tutalım)
+            location.reload();
+        }
+
+        // 3. Bar Grafiğini Güncelle (Son Uyarı Türleri)
+        const typeCount = {};
+        data.recent_alerts.forEach(a => {
+            typeCount[a.alert_type] = (typeCount[a.alert_type] || 0) + 1;
+        });
+        if (alertChart && Object.keys(typeCount).length > 0) {
+            alertChart.data.labels = Object.keys(typeCount);
+            alertChart.data.datasets[0].data = Object.values(typeCount);
+            alertChart.update('none');
+        }
+
+        // 4. Tabloyu Güncelle
+        const tbody = document.getElementById('alertsTableBody');
+        if (data.recent_alerts.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" class="text-center py-5 text-muted">
+                <i class="bi bi-shield-check" style="font-size: 2.5rem; color: var(--dm-success);"></i><br><br>
+                <strong>Sistem temiz!</strong><br>Herhangi bir uyarı bulunmamaktadır.</td></tr>`;
+        } else {
+            let html = '';
+            data.recent_alerts.forEach(a => {
+                const macTrunc = String(a.device).substring(0, 11) + '...'; // Device ID is returned as primary key
+                const statusHtml = a.is_resolved 
+                    ? '<span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>'
+                    : '<span class="dm-badge bg-danger"><i class="bi bi-clock me-1"></i>Beklemede</span>';
+                
+                html += `<tr>
+                    <td class="px-4 text-muted">${formatDate(a.created_at)}</td>
+                    <td><a href="/api/monitoring/ui/devices/${a.device}/" class="text-decoration-none fw-medium">${macTrunc}</a></td>
+                    <td><span class="dm-badge bg-${getAlertBadgeClass(a.alert_type)}">${a.alert_type}</span></td>
+                    <td>${a.message.length > 50 ? a.message.substring(0, 50) + '...' : a.message}</td>
+                    <td class="px-4">${statusHtml}</td>
+                </tr>`;
+            });
+            tbody.innerHTML = html;
+        }
+    }).catch(e => console.error('Dashboard güncelleme hatası:', e));
+}
+
+// Başlat ve Zamanlayıcıyı Kur
+initCharts();
+setInterval(refreshDashboard, 15000); // 15 saniyede bir güncelle
+</script>
+{% endblock %}

@@ -1,0 +1,123 @@
+{% extends 'monitoring/base.html' %}
+
+{% block title %}Cihazlar{% endblock %}
+
+{% block content %}
+<!-- Sayfa Başlığı + Arama -->
+<div class="dm-page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-pc-display me-2"></i>Cihaz Listesi</h2>
+        <p class="text-muted mb-0">Toplam {{ devices|length }} cihaz kayıtlı</p>
+    </div>
+    <div>
+        <input type="text" id="deviceSearch" class="form-control dm-search" placeholder="Cihaz ara (MAC, OS, konum...)">
+    </div>
+</div>
+
+<!-- Cihaz Tablosu -->
+<div class="card dm-card dm-animate">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table dm-table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th class="px-4 py-3">Cihaz</th>
+                        <th class="py-3">İşletim Sistemi</th>
+                        <th class="py-3">Konum</th>
+                        <th class="py-3">Donanım</th>
+                        <th class="py-3">Yük (CPU/RAM)</th>
+                        <th class="py-3">Son Görülme</th>
+                        <th class="py-3">Durum</th>
+                        <th class="py-3 text-end px-4">İşlem</th>
+                    </tr>
+                </thead>
+                <tbody id="deviceTable">
+                    {% for device in devices %}
+                    <tr class="device-row">
+                        <td class="px-4">
+                            <div class="fw-medium">
+                                {% if device.hardware %}
+                                    <i class="bi bi-{% if 'Darwin' in device.os_info %}apple{% elif 'Windows' in device.os_info %}windows{% else %}ubuntu{% endif %} me-1 text-muted"></i>
+                                    {{ device.hardware.hostname|default:device.mac_address }}
+                                {% else %}
+                                    {{ device.mac_address }}
+                                {% endif %}
+                            </div>
+                            <small class="text-muted">{{ device.mac_address }}</small>
+                        </td>
+                        <td>{{ device.os_info }}</td>
+                        <td>
+                            {% if device.location %}
+                                <span class="text-muted"><i class="bi bi-geo-alt me-1"></i></span>
+                                {{ device.location.building }} / Kat {{ device.location.floor }} / {{ device.location.room }}
+                            {% else %}
+                                <span class="text-muted fst-italic">Atanmamış</span>
+                            {% endif %}
+                        <td>
+                            {% if device.hardware %}
+                                <small>
+                                    <i class="bi bi-cpu me-1"></i>{{ device.hardware.cpu_info|truncatechars:20 }}<br>
+                                    <i class="bi bi-memory me-1"></i>{{ device.hardware.ram_total }}
+                                </small>
+                            {% else %}
+                                <span class="text-muted fst-italic">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if device.latest_heartbeat %}
+                                <div class="d-flex flex-column gap-1" style="font-size:0.8rem; font-weight:600;">
+                                    <div class="text-primary"><i class="bi bi-activity me-1"></i> %{{ device.latest_heartbeat.cpu_percent|floatformat:1 }}</div>
+                                    <div class="text-info"><i class="bi bi-memory me-1"></i> %{{ device.latest_heartbeat.ram_percent|floatformat:1 }}</div>
+                                </div>
+                            {% else %}
+                                <span class="text-muted fst-italic">—</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <small class="text-muted">{{ device.last_seen|date:"d M H:i:s" }}</small>
+                        </td>
+                        <td>
+                            {% if device.is_active %}
+                                <span class="dm-badge bg-success">
+                                    <span class="dm-live-dot me-1" style="width:6px;height:6px;vertical-align:middle;"></span>Aktif
+                                </span>
+                            {% else %}
+                                <span class="dm-badge bg-danger">
+                                    <i class="bi bi-x-circle me-1"></i>Pasif
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end px-4">
+                            <a href="{% url 'ui_device_detail' pk=device.mac_address %}" class="btn btn-sm btn-dm-primary">
+                                <i class="bi bi-eye me-1"></i>Detay
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted">
+                            <i class="bi bi-inbox" style="font-size: 2.5rem;"></i>
+                            <br><br><strong>Henüz kayıtlı cihaz yok</strong><br>
+                            Agent'ı çalıştırarak cihaz kaydı yapabilirsiniz.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Arama fonksiyonu — tabloda filtreleme yapar (client-side)
+document.getElementById('deviceSearch').addEventListener('input', function() {
+    const query = this.value.toLowerCase();
+    document.querySelectorAll('.device-row').forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(query) ? '' : 'none';
+    });
+});
+</script>
+{% endblock %}

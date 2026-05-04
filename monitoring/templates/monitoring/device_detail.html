@@ -1,0 +1,406 @@
+{% extends 'monitoring/base.html' %}
+{% block title %}{{ device.mac_address }}{% endblock %}
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+.dm-section-nav{position:sticky;top:0;z-index:100;background:var(--dm-card-bg);border-bottom:2px solid var(--dm-border);padding:.6rem 0;margin:-1.5rem -12px 1.5rem;padding-left:12px;padding-right:12px}
+.dm-section-nav .btn{font-weight:600;font-size:.8rem;border-radius:8px;padding:.4rem 1rem;transition:all .2s}
+.dm-section-nav .btn.active{background:var(--dm-primary);color:#fff;box-shadow:0 2px 8px rgba(67,97,238,.3)}
+.dm-section{scroll-margin-top:70px;margin-bottom:2rem}
+.dm-section-title{font-weight:700;font-size:1.1rem;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:2px solid var(--dm-border)}
+.dm-info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.75rem}
+.dm-info-item{background:#f8f9fc;border-radius:10px;padding:1rem;text-align:center}
+.dm-info-item .label{font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--dm-text-muted);font-weight:600}
+.dm-info-item .value{font-size:1.3rem;font-weight:800;margin-top:.25rem}
+.dm-process-table{font-size:.8rem}
+.dm-process-table th{font-size:.7rem;text-transform:uppercase;letter-spacing:.5px}
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Başlık -->
+<div class="dm-page-header d-flex justify-content-between align-items-start flex-wrap gap-2 dm-animate">
+    <div>
+        <h2 class="mb-1">
+            <i class="bi bi-{% if 'Darwin' in device.os_info %}apple{% elif 'Windows' in device.os_info %}windows{% else %}pc-display{% endif %} me-2"></i>
+            {% if hardware %}{{ hardware.hostname }}{% else %}{{ device.mac_address }}{% endif %}
+        </h2>
+        <p class="text-muted mb-0">
+            <i class="bi bi-ethernet me-1"></i>{{ device.mac_address }} · {{ device.os_info }}
+            {% if hardware.ip_address %} · <i class="bi bi-globe me-1"></i>{{ hardware.ip_address }}{% endif %}
+        </p>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        {% if device.is_active %}
+            <span class="dm-badge bg-success px-3 py-2"><span class="dm-live-dot me-1" style="width:6px;height:6px;vertical-align:middle"></span>Aktif</span>
+        {% else %}
+            <span class="dm-badge bg-danger px-3 py-2"><i class="bi bi-x-circle me-1"></i>Pasif</span>
+        {% endif %}
+        <small class="text-muted" id="lastUpdate">Son: {{ device.last_seen|date:"d M H:i:s" }}</small>
+        <span class="dm-badge bg-dark px-2 py-1" style="font-size:.65rem"><span class="dm-live-dot me-1" style="width:5px;height:5px;vertical-align:middle"></span>15sn</span>
+    </div>
+</div>
+
+<!-- Sticky Section Nav -->
+<div class="dm-section-nav">
+    <div class="d-flex gap-2 flex-wrap">
+        <a href="#genel" class="btn btn-outline-secondary btn-sm active" data-section="genel"><i class="bi bi-speedometer2 me-1"></i>Genel</a>
+        <a href="#cpu" class="btn btn-outline-secondary btn-sm" data-section="cpu"><i class="bi bi-cpu me-1"></i>CPU</a>
+        <a href="#bellek" class="btn btn-outline-secondary btn-sm" data-section="bellek"><i class="bi bi-memory me-1"></i>Bellek</a>
+        <a href="#disk" class="btn btn-outline-secondary btn-sm" data-section="disk"><i class="bi bi-hdd me-1"></i>Disk</a>
+        <a href="#ag" class="btn btn-outline-secondary btn-sm" data-section="ag"><i class="bi bi-wifi me-1"></i>Ağ</a>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- BÖLÜM 1: GENEL DURUM -->
+<!-- ============================================================ -->
+<div id="genel" class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-speedometer2 me-2"></i>Genel Durum</h5>
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-md">
+            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+                <i class="bi bi-cpu text-primary" style="font-size:1.5rem"></i>
+                <h3 class="fw-bold mt-1 mb-0" id="cpuValue" style="color:var(--dm-primary)">%{{ latest_hb.cpu_percent|floatformat:1|default:"—" }}</h3>
+                <p class="text-muted mb-1" style="font-size:.75rem">CPU</p>
+                <div class="progress dm-progress"><div class="progress-bar bg-primary" id="cpuBar" style="width:{{ latest_hb.cpu_percent|default:0 }}%"></div></div>
+            </div></div>
+        </div>
+        <div class="col-6 col-md">
+            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+                <i class="bi bi-memory" style="font-size:1.5rem;color:var(--dm-info)"></i>
+                <h3 class="fw-bold mt-1 mb-0" id="ramValue" style="color:var(--dm-info)">%{{ latest_hb.ram_percent|floatformat:1|default:"—" }}</h3>
+                <p class="text-muted mb-1" style="font-size:.75rem">RAM</p>
+                <div class="progress dm-progress"><div class="progress-bar bg-info" id="ramBar" style="width:{{ latest_hb.ram_percent|default:0 }}%"></div></div>
+            </div></div>
+        </div>
+        <div class="col-6 col-md">
+            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+                <i class="bi bi-hdd" style="font-size:1.5rem;color:var(--dm-warning)"></i>
+                <h3 class="fw-bold mt-1 mb-0" id="diskValue" style="color:#e6a817">%{{ latest_hb.disk_percent|floatformat:1|default:"—" }}</h3>
+                <p class="text-muted mb-1" style="font-size:.75rem">Disk</p>
+                <div class="progress dm-progress"><div class="progress-bar bg-warning" id="diskBar" style="width:{{ latest_hb.disk_percent|default:0 }}%"></div></div>
+            </div></div>
+        </div>
+        <div class="col-6 col-md">
+            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+                {% if latest_hb.battery_percent != None %}
+                <i class="bi bi-{% if latest_hb.battery_plugged %}plug{% else %}battery-half{% endif %}" style="font-size:1.5rem;color:var(--dm-success)"></i>
+                <h3 class="fw-bold mt-1 mb-0" style="color:var(--dm-success)">%{{ latest_hb.battery_percent|floatformat:0 }}</h3>
+                <p class="text-muted mb-1" style="font-size:.75rem">{% if latest_hb.battery_plugged %}🔌 Şarjda{% else %}🔋 Pilde{% endif %}</p>
+                <div class="progress dm-progress"><div class="progress-bar bg-success" style="width:{{ latest_hb.battery_percent }}%"></div></div>
+                {% else %}
+                <i class="bi bi-diagram-3" style="font-size:1.5rem;color:#6f42c1"></i>
+                <h3 class="fw-bold mt-1 mb-0" id="processValue" style="color:#6f42c1">{{ latest_hb.process_count|default:"—" }}</h3>
+                <p class="text-muted mb-1" style="font-size:.75rem">Süreç</p>
+                {% endif %}
+            </div></div>
+        </div>
+        <div class="col-6 col-md">
+            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+                <i class="bi bi-diagram-3" style="font-size:1.5rem;color:#6f42c1"></i>
+                <h3 class="fw-bold mt-1 mb-0" id="processValue2" style="color:#6f42c1">{{ latest_hb.process_count|default:"—" }}</h3>
+                <p class="text-muted mb-1" style="font-size:.75rem">Süreç</p>
+            </div></div>
+        </div>
+    </div>
+    <!-- Donanım + Konum Bilgisi -->
+    <div class="row g-3">
+        <div class="col-lg-8">
+            <div class="card dm-card h-100"><div class="card-header"><h6 class="mb-0 fw-bold"><i class="bi bi-motherboard me-2"></i>Donanım</h6></div>
+            <div class="card-body">{% if hardware %}<div class="row">
+                <div class="col-md-6"><table class="table table-borderless table-sm mb-0">
+                    <tr><td class="text-muted" style="width:40%">Bilgisayar Adı</td><td class="fw-medium">{{ hardware.hostname|default:"—" }}</td></tr>
+                    <tr><td class="text-muted">IP Adresi</td><td class="fw-medium">{{ hardware.ip_address|default:"—" }}</td></tr>
+                    <tr><td class="text-muted">İşlemci</td><td class="fw-medium">{{ hardware.cpu_info }}</td></tr>
+                    <tr><td class="text-muted">Çekirdek</td><td class="fw-medium">{{ hardware.cpu_cores }} / {{ hardware.cpu_threads }} thread</td></tr>
+                </table></div>
+                <div class="col-md-6"><table class="table table-borderless table-sm mb-0">
+                    <tr><td class="text-muted" style="width:40%">Toplam RAM</td><td class="fw-medium">{{ hardware.ram_total }}</td></tr>
+                    <tr><td class="text-muted">Ekran Kartı</td><td class="fw-medium">{{ hardware.vga_info }}</td></tr>
+                    <tr><td class="text-muted">İşletim Sistemi</td><td class="fw-medium">{{ device.os_info }}</td></tr>
+                    <tr><td class="text-muted">Güncelleme</td><td class="fw-medium">{{ hardware.last_updated|date:"d M H:i:s" }}</td></tr>
+                </table></div>
+            </div>{% else %}<p class="text-muted text-center py-3 mb-0">Donanım bilgisi yok</p>{% endif %}</div></div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card dm-card h-100"><div class="card-header"><h6 class="mb-0 fw-bold"><i class="bi bi-geo-alt me-2"></i>Konum</h6></div>
+            <div class="card-body">{% if location %}<table class="table table-borderless table-sm mb-0">
+                <tr><td class="text-muted">Bina</td><td class="fw-medium">{{ location.building }}</td></tr>
+                <tr><td class="text-muted">Kat</td><td class="fw-medium">{{ location.floor }}</td></tr>
+                <tr><td class="text-muted">Oda</td><td class="fw-medium">{{ location.room }}</td></tr>
+            </table>{% else %}<div class="text-center py-3"><p class="text-muted mb-2">Atanmamış</p>
+            <a href="{% url 'ui_add_location' %}" class="btn btn-sm btn-dm-primary"><i class="bi bi-plus-circle me-1"></i>Ata</a></div>{% endif %}</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- BÖLÜM 2: CPU DETAY -->
+<!-- ============================================================ -->
+<div id="cpu" class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-cpu me-2"></i>CPU Detayları</h5>
+    <div class="dm-info-grid mb-3">
+        <div class="dm-info-item"><div class="label">Sistem</div><div class="value" style="color:var(--dm-danger)">%{{ latest_hb.cpu_system|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item"><div class="label">Kullanıcı</div><div class="value" style="color:var(--dm-primary)">%{{ latest_hb.cpu_user|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item"><div class="label">Boş</div><div class="value" style="color:var(--dm-success)">%{{ latest_hb.cpu_idle|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item"><div class="label">Frekans</div><div class="value">{{ latest_hb.cpu_freq|floatformat:0|default:"0" }} MHz</div></div>
+        <div class="dm-info-item"><div class="label">İş Parçacığı</div><div class="value" style="color:#6f42c1">{{ latest_hb.thread_count|default:"0" }}</div></div>
+        <div class="dm-info-item"><div class="label">İşlem Sayısı</div><div class="value">{{ latest_hb.process_count|default:"0" }}</div></div>
+    </div>
+    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-activity me-2"></i>CPU Yükü</h6></div>
+    <div class="card-body" style="padding:.5rem"><canvas id="cpuChart" height="80"></canvas></div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- BÖLÜM 3: BELLEK/RAM DETAY -->
+<!-- ============================================================ -->
+<div id="bellek" class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-memory me-2"></i>Bellek (RAM) Detayları</h5>
+    <div class="row g-3 mb-3">
+        <div class="col-md-7">
+            <div class="dm-info-grid">
+                <div class="dm-info-item"><div class="label">Fiziksel Bellek</div><div class="value">{{ latest_hb.memory_total|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item"><div class="label">Kullanılan</div><div class="value" style="color:var(--dm-danger)">{{ latest_hb.memory_used|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item"><div class="label">Kullanılabilir</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.memory_available|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item"><div class="label">Önbellek</div><div class="value" style="color:var(--dm-info)">{{ latest_hb.memory_cached|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item"><div class="label">Takas Toplam</div><div class="value">{{ latest_hb.swap_total|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item"><div class="label">Takas Kullanılan</div><div class="value" style="color:var(--dm-warning)">{{ latest_hb.swap_used|default:0|filesizeformat }}</div></div>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div class="card dm-card h-100"><div class="card-header"><h6 class="mb-0 fw-bold"><i class="bi bi-pie-chart me-2"></i>Bellek Dağılımı</h6></div>
+            <div class="card-body d-flex align-items-center justify-content-center"><canvas id="memDoughnut" style="max-height:180px"></canvas></div></div>
+        </div>
+    </div>
+    <div class="card dm-card mt-3"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-activity me-2"></i>Bellek Yoğunluğu</h6></div>
+    <div class="card-body" style="padding:.5rem"><canvas id="memChart" height="80"></canvas></div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- BÖLÜM 4: DİSK I/O -->
+<!-- ============================================================ -->
+<div id="disk" class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-hdd me-2"></i>Disk Detayları</h5>
+    <div class="dm-info-grid mb-3">
+        <div class="dm-info-item"><div class="label">Disk Kullanımı</div><div class="value" style="color:var(--dm-warning)">%{{ latest_hb.disk_percent|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item"><div class="label">Toplam Okunan</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.disk_read_bytes|default:0|filesizeformat }}</div></div>
+        <div class="dm-info-item"><div class="label">Toplam Yazılan</div><div class="value" style="color:var(--dm-primary)">{{ latest_hb.disk_write_bytes|default:0|filesizeformat }}</div></div>
+    </div>
+    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Disk Giriş/Çıkış</h6></div>
+    <div class="card-body" style="padding:.5rem"><canvas id="diskChart" height="90"></canvas></div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- BÖLÜM 5: AĞ -->
+<!-- ============================================================ -->
+<div id="ag" class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-wifi me-2"></i>Ağ Detayları</h5>
+    <div class="dm-info-grid mb-3">
+        <div class="dm-info-item"><div class="label">Alınan Veri</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.net_bytes_recv|default:0|filesizeformat }}</div></div>
+        <div class="dm-info-item"><div class="label">Gönderilen Veri</div><div class="value" style="color:var(--dm-primary)">{{ latest_hb.net_bytes_sent|default:0|filesizeformat }}</div></div>
+        <div class="dm-info-item"><div class="label">Gelen Paket</div><div class="value">{{ latest_hb.net_packets_recv|default:0 }}</div></div>
+        <div class="dm-info-item"><div class="label">Giden Paket</div><div class="value">{{ latest_hb.net_packets_sent|default:0 }}</div></div>
+    </div>
+    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Ağ Giriş/Çıkış</h6></div>
+    <div class="card-body" style="padding:.5rem"><canvas id="netChart" height="90"></canvas></div></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- BÖLÜM 6: TOP İŞLEMLER -->
+<!-- ============================================================ -->
+<div class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-list-task me-2"></i>En Çok Kaynak Kullanan İşlemler</h5>
+    <div class="card dm-card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table dm-table dm-process-table table-hover align-middle mb-0">
+                    <thead><tr>
+                        <th class="px-4 py-3">#</th>
+                        <th class="py-3">İşlem Adı</th>
+                        <th class="py-3 text-end">CPU %</th>
+                        <th class="py-3 text-end">Bellek (MB)</th>
+                        <th class="py-3 text-end px-4">İş Parçacığı</th>
+                    </tr></thead>
+                    <tbody id="processTable">
+                        {% for proc in latest_hb.top_processes %}
+                        <tr>
+                            <td class="px-4 text-muted">{{ forloop.counter }}</td>
+                            <td class="fw-medium">{{ proc.name }}</td>
+                            <td class="text-end"><span class="dm-badge {% if proc.cpu > 10 %}bg-danger{% elif proc.cpu > 5 %}bg-warning text-dark{% else %}bg-light text-dark{% endif %}">{{ proc.cpu }}%</span></td>
+                            <td class="text-end">{{ proc.mem_mb }} MB</td>
+                            <td class="text-end px-4">{{ proc.threads }}</td>
+                        </tr>
+                        {% empty %}
+                        <tr><td colspan="5" class="text-center py-4 text-muted">İşlem verisi bekleniyor...</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Uyarılar -->
+<div class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-exclamation-triangle me-2"></i>Cihaz Uyarıları</h5>
+    <div class="card dm-card"><div class="card-body p-0"><div class="table-responsive">
+        <table class="table dm-table table-hover align-middle mb-0">
+            <thead><tr><th class="px-4 py-3">Tarih</th><th class="py-3">Tür</th><th class="py-3">Mesaj</th><th class="py-3 px-4">Durum</th></tr></thead>
+            <tbody>
+                {% for alert in recent_alerts %}
+                <tr>
+                    <td class="px-4 text-muted">{{ alert.created_at|date:"d M H:i:s" }}</td>
+                    <td><span class="dm-badge bg-{% if alert.alert_type == 'CPU_HIGH' %}danger{% elif alert.alert_type == 'RAM_HIGH' %}warning text-dark{% else %}info{% endif %}">{{ alert.alert_type }}</span></td>
+                    <td>{{ alert.message }}</td>
+                    <td class="px-4">{% if alert.is_resolved %}<span class="dm-badge bg-success">Çözüldü</span>{% else %}<span class="dm-badge bg-danger">Beklemede</span>{% endif %}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="text-center py-4 text-muted"><i class="bi bi-shield-check" style="font-size:1.5rem;color:var(--dm-success)"></i><br>Uyarı yok</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div></div></div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const MAC = "{{ device.mac_address }}";
+// Sticky Nav
+document.querySelectorAll('.dm-section-nav a').forEach(btn=>{
+    btn.addEventListener('click',e=>{e.preventDefault();document.querySelector(btn.getAttribute('href')).scrollIntoView({behavior:'smooth'});});
+});
+const observer = new IntersectionObserver(entries=>{
+    entries.forEach(entry=>{if(entry.isIntersecting){
+        document.querySelectorAll('.dm-section-nav a').forEach(b=>b.classList.remove('active'));
+        const b=document.querySelector(`.dm-section-nav a[data-section="${entry.target.id}"]`);if(b)b.classList.add('active');
+    }});
+},{rootMargin:'-100px 0px -60% 0px'});
+document.querySelectorAll('.dm-section[id]').forEach(s=>observer.observe(s));
+
+// Byte formatla
+function fmtBytes(b){if(b>1073741824)return (b/1073741824).toFixed(1)+' GB';if(b>1048576)return (b/1048576).toFixed(1)+' MB';if(b>1024)return (b/1024).toFixed(0)+' KB';return b+' B';}
+
+// Dataset oluştur
+function mkDs(label,color,data,neg){
+    const d = neg ? data.map(v=>-v) : data;
+    return {label,data:d,borderColor:color,backgroundColor:color.replace(')',',0.2)').replace('rgb','rgba'),fill:true,tension:0.3,pointRadius:0,pointHoverRadius:4,borderWidth:2};
+}
+
+let cpuC,memC,memD,diskC,netC;
+
+function init(hbs){
+    const d=hbs.slice().reverse();if(!d.length)return;
+    const lb=d.map(x=>{const t=new Date(x.timestamp);return t.getHours().toString().padStart(2,'0')+':'+t.getMinutes().toString().padStart(2,'0')+':'+t.getSeconds().toString().padStart(2,'0');});
+
+    // Tooltip crosshair: mouse ile gezince dikey çizgi + değer göster
+    const ttOpts={mode:'index',intersect:false,position:'nearest',
+        titleFont:{size:10},bodyFont:{size:11,weight:'bold'},padding:6,
+        displayColors:true,boxWidth:8,boxHeight:8};
+
+    // ========== CPU CHART (bar + line) ==========
+    cpuC=new Chart(document.getElementById('cpuChart'),{type:'bar',data:{labels:lb,datasets:[
+        {type:'bar',label:'CPU',data:d.map(x=>x.cpu_percent),backgroundColor:'rgba(67,97,238,0.35)',borderColor:'rgba(67,97,238,0.6)',borderWidth:1,borderRadius:1,order:2},
+        {type:'line',label:'Trend',data:d.map(x=>x.cpu_percent),borderColor:'#4361ee',backgroundColor:'transparent',fill:false,tension:0.3,pointRadius:0,pointHoverRadius:4,borderWidth:2,order:1}
+    ]},options:{
+        responsive:true,animation:{duration:200},
+        scales:{
+            y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%',stepSize:20,font:{size:9},maxTicksLimit:6},grid:{color:'rgba(0,0,0,.06)'}},
+            x:{ticks:{maxTicksLimit:6,font:{size:8}},grid:{display:false}}
+        },
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false},tooltip:{...ttOpts,filter:item=>item.datasetIndex===0,callbacks:{label:ctx=>'CPU: %'+ctx.parsed.y.toFixed(1)}}}
+    }});
+
+    // ========== MEMORY DOUGHNUT ==========
+    const lt=d[d.length-1];
+    memD=new Chart(document.getElementById('memDoughnut'),{type:'doughnut',data:{
+        labels:['Kullanılan','Önbellek','Kullanılabilir'],
+        datasets:[{data:[lt.memory_used,lt.memory_cached,lt.memory_available],backgroundColor:['#ef476f','#118ab2','#06d6a0'],borderWidth:0,hoverOffset:4}]
+    },options:{responsive:true,cutout:'55%',plugins:{legend:{position:'bottom',labels:{font:{family:'Inter',weight:600,size:10},usePointStyle:true,padding:8}},
+        tooltip:{callbacks:{label:ctx=>ctx.label+': '+fmtBytes(ctx.parsed)}}}}});
+
+    // ========== MEMORY AREA CHART ==========
+    memC=new Chart(document.getElementById('memChart'),{type:'line',data:{labels:lb,datasets:[
+        mkDs('RAM','rgb(17,138,178)',d.map(x=>x.ram_percent))
+    ]},options:{
+        responsive:true,animation:{duration:200},
+        scales:{
+            y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%',stepSize:20,font:{size:9},maxTicksLimit:6},grid:{color:'rgba(0,0,0,.06)'}},
+            x:{ticks:{maxTicksLimit:6,font:{size:8}},grid:{display:false}}
+        },
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false},tooltip:{...ttOpts,callbacks:{label:ctx=>'RAM: %'+ctx.parsed.y.toFixed(1)}}}
+    }});
+
+    // ========== DISK MIRROR CHART ==========
+    const diskR=d.map((x,i)=>i===0?0:(x.disk_read_bytes-d[i-1].disk_read_bytes)/1024);
+    const diskW=d.map((x,i)=>i===0?0:(x.disk_write_bytes-d[i-1].disk_write_bytes)/1024);
+    diskC=new Chart(document.getElementById('diskChart'),{type:'line',data:{labels:lb,datasets:[
+        mkDs('Okunan ↑','rgb(72,209,204)',diskR,false),
+        mkDs('Yazılan ↓','rgb(239,71,111)',diskW,true)
+    ]},options:{
+        responsive:true,animation:{duration:200},
+        scales:{
+            y:{ticks:{callback:v=>{const a=Math.abs(v);return a>1024?(a/1024).toFixed(0)+'MB':a.toFixed(0)+'KB';},font:{size:9},maxTicksLimit:5},grid:{color:'rgba(0,0,0,.06)'}},
+            x:{ticks:{maxTicksLimit:6,font:{size:8}},grid:{display:false}}
+        },
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{labels:{font:{size:9,weight:600},usePointStyle:true,padding:6}},
+            tooltip:{...ttOpts,callbacks:{label:ctx=>{const v=Math.abs(ctx.parsed.y);return ctx.dataset.label+': '+(v>1024?(v/1024).toFixed(1)+' MB':v.toFixed(0)+' KB');}}}}
+    }});
+
+    // ========== NETWORK MIRROR CHART ==========
+    const netR=d.map((x,i)=>i===0?0:(x.net_bytes_recv-d[i-1].net_bytes_recv)/1024);
+    const netS=d.map((x,i)=>i===0?0:(x.net_bytes_sent-d[i-1].net_bytes_sent)/1024);
+    netC=new Chart(document.getElementById('netChart'),{type:'line',data:{labels:lb,datasets:[
+        mkDs('Gelen ↑','rgb(72,209,204)',netR,false),
+        mkDs('Giden ↓','rgb(67,97,238)',netS,true)
+    ]},options:{
+        responsive:true,animation:{duration:200},
+        scales:{
+            y:{ticks:{callback:v=>{const a=Math.abs(v);return a>1024?(a/1024).toFixed(0)+'MB':a.toFixed(0)+'KB';},font:{size:9},maxTicksLimit:5},grid:{color:'rgba(0,0,0,.06)'}},
+            x:{ticks:{maxTicksLimit:6,font:{size:8}},grid:{display:false}}
+        },
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{labels:{font:{size:9,weight:600},usePointStyle:true,padding:6}},
+            tooltip:{...ttOpts,callbacks:{label:ctx=>{const v=Math.abs(ctx.parsed.y);return ctx.dataset.label+': '+(v>1024?(v/1024).toFixed(1)+' MB':v.toFixed(0)+' KB');}}}}
+    }});
+}
+
+function refresh(){
+    fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/stats/`).then(r=>r.json()).then(data=>{
+        if(!data.heartbeats||!data.heartbeats.length)return;
+        const d=data.heartbeats.slice().reverse(),lt=data.heartbeats[0];
+        const lb=d.map(x=>{const t=new Date(x.timestamp);return t.getHours().toString().padStart(2,'0')+':'+t.getMinutes().toString().padStart(2,'0')+':'+t.getSeconds().toString().padStart(2,'0');});
+
+        if(cpuC){cpuC.data.labels=lb;const cpuD=d.map(x=>x.cpu_percent);cpuC.data.datasets[0].data=cpuD;cpuC.data.datasets[1].data=cpuD;cpuC.update('none');}
+        if(memC){memC.data.labels=lb;memC.data.datasets[0].data=d.map(x=>x.ram_percent);memC.update('none');}
+        if(memD){memD.data.datasets[0].data=[lt.memory_used,lt.memory_cached,lt.memory_available];memD.update('none');}
+
+        // Disk delta
+        if(diskC){
+            const dR=d.map((x,i)=>i===0?0:(x.disk_read_bytes-d[i-1].disk_read_bytes)/1024);
+            const dW=d.map((x,i)=>i===0?0:-(x.disk_write_bytes-d[i-1].disk_write_bytes)/1024);
+            diskC.data.labels=lb;diskC.data.datasets[0].data=dR;diskC.data.datasets[1].data=dW;diskC.update('none');
+        }
+        // Net delta
+        if(netC){
+            const nR=d.map((x,i)=>i===0?0:(x.net_bytes_recv-d[i-1].net_bytes_recv)/1024);
+            const nS=d.map((x,i)=>i===0?0:-(x.net_bytes_sent-d[i-1].net_bytes_sent)/1024);
+            netC.data.labels=lb;netC.data.datasets[0].data=nR;netC.data.datasets[1].data=nS;netC.update('none');
+        }
+
+        document.getElementById('cpuValue').textContent='%'+lt.cpu_percent.toFixed(1);
+        document.getElementById('ramValue').textContent='%'+lt.ram_percent.toFixed(1);
+        document.getElementById('diskValue').textContent='%'+lt.disk_percent.toFixed(1);
+        document.getElementById('cpuBar').style.width=lt.cpu_percent+'%';
+        document.getElementById('ramBar').style.width=lt.ram_percent+'%';
+        document.getElementById('diskBar').style.width=lt.disk_percent+'%';
+        document.getElementById('lastUpdate').textContent='Son: '+new Date(lt.timestamp).toLocaleTimeString('tr-TR');
+    }).catch(e=>console.error(e));
+}
+fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/stats/`).then(r=>r.json()).then(d=>{init(d.heartbeats||[]);setInterval(refresh,15000);});
+</script>
+{% endblock %}
