@@ -16,6 +16,8 @@ from .serializers import (
 # YARDIMCI FONKSİYON — Eski cihazları otomatik pasifleştir
 # ============================================================
 STALE_THRESHOLD_MINUTES = 2  # 2 dakika sinyal gelmezse → pasif
+HEARTBEAT_LIMIT = 1440       # Cihaz başına max kayıt (15sn × 1440 = 6 saat)
+CLEANUP_EVERY = 96           # Her 96 yeni kayıtta bir temizlik yap (≈24 dakika)
 
 def mark_stale_devices_inactive():
     """Son 2 dakikada heartbeat göndermeyen cihazları pasif yapar.
@@ -73,6 +75,14 @@ def receive_heartbeat(request):
                 alert_type='DISK_FULL',
                 message=f'Disk kullanımı kritik seviyede: %{heartbeat.disk_percent:.1f}'
             )
+
+        # Otomatik temizleme: her CLEANUP_EVERY kayıtta bir eski heartbeat'leri sil
+        total = device.heartbeats.count()
+        if total > HEARTBEAT_LIMIT + CLEANUP_EVERY:
+            # N. kaydın timestamp'ini bul, ondan eskilerini sil (ID listesi yüklemekten çok daha verimli)
+            cutoff_ts = device.heartbeats.values_list('timestamp', flat=True)[HEARTBEAT_LIMIT:HEARTBEAT_LIMIT + 1]
+            if cutoff_ts:
+                device.heartbeats.filter(timestamp__lte=cutoff_ts[0]).delete()
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -177,7 +187,8 @@ def device_stats(request, pk):
     except Device.DoesNotExist:
         return Response({'error': 'Cihaz bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
 
-    heartbeats = device.heartbeats.all()[:30]  # Son 30 kayıt (en yeni önce)
+    # Önce en yeni 30'u al, sonra ters çevir → Chart.js soldan sağa doğru zaman ekseni
+    heartbeats = list(reversed(list(device.heartbeats.all()[:30])))
     serializer = HeartbeatLogSerializer(heartbeats, many=True)
     return Response({
         'device': pk,

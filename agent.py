@@ -192,8 +192,8 @@ def get_realtime_usage():
     top_procs = get_top_processes(10)
 
     return {
-        # Ana metrikler
-        "cpu_percent": psutil.cpu_percent(),
+        # Ana metrikler (cpu_times_percent zaten 1sn ölçtü, idle dışı = kullanım)
+        "cpu_percent": round(100.0 - cpu_times.idle, 1),
         "ram_percent": mem.percent,
         "disk_percent": psutil.disk_usage('/').percent,
         "process_count": len(pids),
@@ -314,7 +314,7 @@ def send_heartbeat(mac_address, usage):
             bat_str = ""
             if usage["battery_percent"] is not None:
                 plug = "🔌" if usage["battery_plugged"] else "🔋"
-                bat_str = f" | Bat: {plug}%{usage['battery_percent']:.0f}"
+                bat_str = f" | Bat: {plug} {usage['battery_percent']:.0f}%"
 
             mem_gb = usage['memory_used'] / (1024**3)
             net_mb = usage['net_bytes_recv'] / (1024**2)

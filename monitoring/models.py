@@ -5,8 +5,13 @@ class Device(models.Model):
     mac_address = models.CharField(max_length=17, primary_key=True, unique=True)
     os_info = models.CharField(max_length=255)
     is_active = models.BooleanField(default=True)
-    last_seen = models.DateTimeField(auto_now=True)  # Her heartbeat'te güncellenir
+    last_seen = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['is_active', 'last_seen'], name='device_active_seen_idx'),
+        ]
 
     def __str__(self):
         return self.mac_address
@@ -96,7 +101,11 @@ class HeartbeatLog(models.Model):
     timestamp = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ['-timestamp']  # En yeni kayıt önce gelsin
+        ordering = ['-timestamp']
+        indexes = [
+            # En kritik index: cihaza göre son kayıtları çekme (dashboard grafikleri)
+            models.Index(fields=['device', '-timestamp'], name='heartbeat_device_ts_idx'),
+        ]
 
     def __str__(self):
         return f"{self.device_id} - CPU:{self.cpu_percent}% RAM:{self.ram_percent}% - {self.timestamp}"
@@ -108,6 +117,12 @@ class Alert(models.Model):
     message = models.TextField()
     is_resolved = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=['is_resolved', '-created_at'], name='alert_resolved_ts_idx'),
+            models.Index(fields=['device', '-created_at'], name='alert_device_ts_idx'),
+        ]
 
     def __str__(self):
         return f"{self.alert_type} for {self.device_id} - Resolved: {self.is_resolved}"

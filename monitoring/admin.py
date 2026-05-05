@@ -28,6 +28,7 @@ class HeartbeatLogAdmin(admin.ModelAdmin):
     list_display = ('device', 'cpu_percent', 'ram_percent', 'disk_percent', 'process_count', 'batarya_durumu', 'zaman_damgasi')
     list_filter = ('device',)
     ordering = ('-timestamp',)
+    list_select_related = ('device',)
 
     @admin.display(description='Zaman Damgası')
     def zaman_damgasi(self, obj):

@@ -1,90 +1,110 @@
-# Donanim Izleme Sistemi (Hardware Monitoring System)
+# DevMonitor — Donanım İzleme Sistemi
 
-Django ve Django REST Framework ile gelistirilmis, ag uzerindeki bilgisayarlarin donanim bilgilerini merkezi olarak izleyen bir web uygulamasi.
+Ağdaki bilgisayarların donanım ve performans verilerini gerçek zamanlı olarak merkezi bir panelden izleyen web tabanlı sistem. macOS Etkinlik Monitörü seviyesinde detay sunar.
 
----
-
-## Proje Yapisi
-
-```
-hardware_monitoring_system/
-├── core/                        # Django proje ayarlari
-│   ├── settings.py              # Veritabani, uygulama ayarlari
-│   ├── urls.py                  # Ana URL yonlendirme
-│   ├── wsgi.py
-│   └── asgi.py
-├── monitoring/                  # Ana uygulama
-│   ├── models.py                # Veritabani modelleri (5 model)
-│   ├── views.py                 # API ve UI view'lari
-│   ├── urls.py                  # URL tanimlari (10 API + 4 UI endpoint)
-│   ├── serializers.py           # DRF serializer'lari
-│   ├── admin.py                 # Django admin kayitlari
-│   ├── migrations/              # Veritabani migration dosyalari
-│   └── templates/monitoring/    # HTML sablonlari
-│       ├── base.html            # Ana sablon (navbar, Bootstrap)
-│       ├── device_list.html     # Cihaz listesi sayfasi
-│       ├── alert_list.html      # Uyari listesi sayfasi
-│       ├── add_location.html    # Konum ekleme formu
-│       └── add_alert.html       # Uyari ekleme formu
-├── agent.py                     # Istemci ajan (psutil ile veri toplar)
-└── manage.py
-```
+**Geliştirici:** Hamza Hakverir & Yunus Emre Edizer
 
 ---
 
-## Teknoloji Yigini
+## Özellikler
+
+- **Anlık İzleme** — CPU, RAM, Disk, Ağ ve Batarya verileri 15 saniyede bir güncellenir
+- **Çok Cihaz Desteği** — Aynı anda birden fazla bilgisayarı izle
+- **Otomatik Kayıt** — Agent çalıştırıldığında cihaz otomatik sisteme kaydolur
+- **Otomatik Uyarı** — CPU/RAM/Disk %90'ı geçince uyarı oluşturulur
+- **İşlem Takibi** — En çok kaynak kullanan Top 10 uygulama görüntülenir
+- **Cihaz Durumu** — 2 dakika sinyal gelmezse cihaz otomatik "Pasif" olarak işaretlenir
+- **Konum Yönetimi** — Cihazlara bina/kat/oda bilgisi atanabilir
+- **Veri Optimizasyonu** — Cihaz başına 6 saatlik veri tutulur (1440 kayıt), veritabanı dolmaz
+
+---
+
+## Teknoloji Yığını
 
 | Katman | Teknoloji |
 |---|---|
-| Backend | Python 3.12, Django 5.x |
-| REST API | Django REST Framework |
-| Veritabani | PostgreSQL (Supabase) |
-| Arayuz | Django Templates + Bootstrap 5 |
-| Istemci Ajan | Python (psutil, requests) |
+| Backend | Python 3.12, Django 5.1.4 |
+| REST API | Django REST Framework 3.17 |
+| Veritabanı | PostgreSQL (Supabase) |
+| Arayüz | Django Templates + Bootstrap 5 + Chart.js 4 |
+| İstemci Ajan | Python — psutil, requests |
+| Başlatıcı | Windows Batch Script |
 
 ---
 
-## Veritabani Modelleri
+## Proje Yapısı
 
-### `Device` — Kayitli bilgisayarlar
-| Alan | Tip | Aciklama |
-|---|---|---|
-| `mac_address` | CharField (PK) | Benzersiz kimlik |
-| `os_info` | CharField | Isletim sistemi bilgisi |
-| `is_active` | BooleanField | Aktif/pasif durumu |
-| `created_at` | DateTimeField | Kayit tarihi |
+```
+hardware-monitoring-system/
+├── core/
+│   ├── settings.py          # Veritabanı, uygulama ayarları (.env'den okunur)
+│   ├── urls.py              # Ana URL yönlendirme + kök redirect
+│   ├── wsgi.py
+│   └── asgi.py
+├── monitoring/
+│   ├── models.py            # 5 model: Device, Location, HardwareSpec, HeartbeatLog, Alert
+│   ├── views.py             # 12 API + 6 UI view
+│   ├── serializers.py       # DRF serializer'ları (basit + nested)
+│   ├── urls.py              # 12 API + 6 UI endpoint
+│   ├── admin.py             # Django admin paneli
+│   ├── migrations/          # 6 migration dosyası
+│   └── templates/monitoring/
+│       ├── base.html        # Ana şablon (navbar, Bootstrap, dark/light)
+│       ├── dashboard.html   # Ana panel — kartlar + grafikler + AJAX
+│       ├── device_list.html # Cihaz listesi
+│       ├── device_detail.html  # Cihaz detayı — CPU/RAM/Disk/Ağ grafikleri
+│       ├── alert_list.html  # Uyarı listesi
+│       ├── add_alert.html   # Manuel uyarı formu
+│       └── add_location.html   # Konum atama formu
+├── agent.py                 # İstemci ajan — psutil ile veri toplar
+├── baslat.py                # Tek tıkla başlatıcı (Django + Agent)
+├── CALISTIR.bat             # Windows çift tıklama kısayolu
+├── manage.py
+├── requirements.txt
+└── .env                     # Gizli anahtarlar ve DB bilgileri (git'e ekleme!)
+```
 
-### `Location` — Cihaz konumlari
-| Alan | Tip | Aciklama |
-|---|---|---|
-| `device` | OneToOneField → Device | Bagli cihaz |
-| `building` | CharField | Bina adi |
-| `floor` | CharField | Kat |
-| `room` | CharField | Oda numarasi |
+---
 
-### `HardwareSpec` — Donanim ozellikleri
-| Alan | Tip | Aciklama |
-|---|---|---|
-| `device` | OneToOneField → Device | Bagli cihaz |
-| `cpu_info` | CharField | Islemci bilgisi |
-| `ram_total` | CharField | Toplam RAM (GB) |
-| `vga_info` | CharField | Ekran karti bilgisi |
-| `last_updated` | DateTimeField | Son guncelleme |
+## Veritabanı Modelleri
 
-### `HeartbeatLog` — Canlilik kayitlari
-| Alan | Tip | Aciklama |
+### `Device` — Kayıtlı cihazlar
+| Alan | Tip | Açıklama |
 |---|---|---|
-| `device` | ForeignKey → Device | Bagli cihaz |
-| `timestamp` | DateTimeField | Sinyal zamani |
+| `mac_address` | CharField (PK) | Birincil anahtar — cihaz kimliği |
+| `os_info` | CharField | İşletim sistemi (örn. "Windows 11") |
+| `is_active` | BooleanField | Son 2 dakikada sinyal geldi mi? |
+| `last_seen` | DateTimeField | Son heartbeat zamanı |
+| `created_at` | DateTimeField | İlk kayıt tarihi |
 
-### `Alert` — Uyarilar
-| Alan | Tip | Aciklama |
+### `HardwareSpec` — Donanım özellikleri (statik)
+| Alan | Tip | Açıklama |
 |---|---|---|
-| `device` | ForeignKey → Device | Bagli cihaz |
-| `alert_type` | CharField | Uyari turu (CPU_HIGH, DISK_FULL vb.) |
-| `message` | TextField | Uyari detayi |
-| `is_resolved` | BooleanField | Cozuldu mu? |
-| `created_at` | DateTimeField | Olusturulma tarihi |
+| `device` | OneToOneField | Bağlı cihaz |
+| `cpu_info` | CharField | İşlemci modeli |
+| `cpu_cores` | IntegerField | Fiziksel çekirdek sayısı |
+| `cpu_threads` | IntegerField | Mantıksal thread sayısı |
+| `ram_total` | CharField | Toplam RAM (örn. "15.75 GB") |
+| `vga_info` | CharField | Ekran kartı |
+| `hostname` | CharField | Bilgisayar adı |
+| `ip_address` | CharField | Yerel ağ IP'si |
+
+### `HeartbeatLog` — Anlık performans kayıtları
+| Grup | Alanlar |
+|---|---|
+| Ana metrikler | `cpu_percent`, `ram_percent`, `disk_percent`, `process_count` |
+| Batarya | `battery_percent`, `battery_plugged` |
+| CPU detay | `cpu_system`, `cpu_user`, `cpu_idle`, `cpu_freq`, `thread_count` |
+| Bellek detay | `memory_total`, `memory_used`, `memory_available`, `memory_cached`, `swap_total`, `swap_used` |
+| Disk I/O | `disk_read_bytes`, `disk_write_bytes` |
+| Ağ | `net_bytes_sent`, `net_bytes_recv`, `net_packets_sent`, `net_packets_recv` |
+| İşlemler | `top_processes` (JSON — Top 10 CPU/RAM) |
+
+### `Location` — Fiziksel konum
+`building`, `floor`, `room` alanları — cihaza isteğe bağlı atanır.
+
+### `Alert` — Sistem uyarıları
+`alert_type` (CPU_HIGH / RAM_HIGH / DISK_FULL), `message`, `is_resolved`, `created_at`
 
 ---
 
@@ -92,98 +112,123 @@ hardware_monitoring_system/
 
 Base URL: `http://127.0.0.1:8000/api/monitoring/`
 
-| # | Method | URL | Aciklama |
-|---|---|---|---|
-| 1 | GET | `devices/` | Tum cihazlari listele |
-| 2 | POST | `devices/register/` | Yeni cihaz kaydet |
-| 3 | GET | `devices/<mac>/` | Tek cihaz detayi |
-| 4 | POST | `heartbeats/` | Canlilik sinyali al |
-| 5 | GET | `locations/` | Tum konumlari listele |
-| 6 | POST | `locations/add/` | Konum ekle |
-| 7 | POST | `hardware/` | Donanim bilgisi guncelle/ekle |
-| 8 | GET | `hardware/<mac>/` | Cihaz donanim bilgisini getir |
-| 9 | GET | `alerts/` | Tum uyarilari listele |
-| 10 | POST/PATCH | `alerts/<id>/resolve/` | Uyariyi cozuldu isaretle |
+| Method | URL | Açıklama |
+|---|---|---|
+| POST | `devices/register/` | Yeni cihaz kaydet |
+| GET | `devices/` | Tüm cihazları listele |
+| GET | `devices/<mac>/` | Cihaz detayı (nested) |
+| GET | `devices/<mac>/stats/` | Son 30 heartbeat — Chart.js için |
+| POST | `heartbeats/` | Anlık performans verisi al |
+| POST | `hardware/` | Donanım bilgisi güncelle/ekle |
+| GET | `hardware/<mac>/` | Cihaz donanım bilgisi |
+| POST | `locations/add/` | Konum ekle |
+| GET | `locations/` | Tüm konumlar |
+| GET | `alerts/` | Tüm uyarılar |
+| POST/PATCH | `alerts/<id>/resolve/` | Uyarıyı çözüldü işaretle |
+| GET | `dashboard/stats/` | Dashboard özet — AJAX için |
 
 ---
 
-## Arayuz (UI) Sayfalari
+## Kurulum
 
-| URL | Aciklama |
-|---|---|
-| `/api/monitoring/ui/devices/` | Kayitli cihazlar listesi |
-| `/api/monitoring/ui/alerts/` | Uyarilar listesi |
-| `/api/monitoring/ui/add-location/` | Cihaza konum atama formu |
-| `/api/monitoring/ui/add-alert/` | Manuel uyari olusturma formu |
-
----
-
-## Kurulum ve Calistirma
-
-### 1. Gereksinimleri Kur
+### 1. Gereksinimleri kur
 
 ```bash
-pip install django djangorestframework psycopg2-binary psutil requests
+pip install -r requirements.txt
 ```
 
-### 2. Veritabani Ayarlarini Yapin
+### 2. `.env` dosyası oluştur
 
-`core/settings.py` dosyasindaki `DATABASES` bolumunu kendi PostgreSQL bilgilerinizle guncelleyin:
+Proje kökünde `.env` dosyası oluştur:
 
-```python
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': 'veritabani_adi',
-        'USER': 'kullanici_adi',
-        'PASSWORD': 'sifreniz',
-        'HOST': 'localhost',
-        'PORT': '5432',
-    }
-}
+```env
+SECRET_KEY=django-insecure-buraya-gizli-anahtar-yaz
+DEBUG=True
+
+DB_ENGINE=django.db.backends.postgresql
+DB_NAME=postgres
+DB_USER=kullanici_adi
+DB_PASSWORD=sifreniz
+DB_HOST=db.supabase.co
+DB_PORT=5432
+DB_SSLMODE=require
 ```
 
-> Supabase kullaniyorsaniz `OPTIONS: {'sslmode': 'require'}` ekleyin.
+> Supabase kullanıyorsan `DB_SSLMODE=require` satırını mutlaka ekle.
 
-### 3. Tablolari Olustur
+### 3. Tabloları oluştur
 
 ```bash
 python manage.py migrate
 ```
 
-### 4. Sunucuyu Baslat
+### 4. Admin kullanıcısı oluştur (isteğe bağlı)
 
 ```bash
-python manage.py runserver
+python manage.py createsuperuser
 ```
-
-Tarayicidan `http://127.0.0.1:8000/api/monitoring/ui/devices/` adresine gidin.
 
 ---
 
-## Ajan Uygulamasi (agent.py)
+## Çalıştırma
 
-`agent.py`, izlenecek bilgisayarlarda calistirilacak istemci betigidir. Calistirildigi bilgisayarin MAC adresi, isletim sistemi ve donanim bilgilerini otomatik olarak sunucuya kaydeder.
+### Yöntem A — Tek tıkla (Windows)
+
+`CALISTIR.bat` dosyasına çift tıkla. Django ve Agent otomatik başlar, tarayıcı açılır.
+
+### Yöntem B — Manuel
 
 ```bash
+# Terminal 1 — Django sunucusu
+python manage.py runserver
+
+# Terminal 2 — İzleme ajanı
 python agent.py
 ```
 
-**Toplanan veriler:**
-- MAC adresi (`uuid` modulu ile)
-- Isletim sistemi (`platform` modulu ile)
-- Islemci bilgisi (`platform.processor()`)
-- Toplam RAM (`psutil.virtual_memory()`)
+### Erişim
 
-**Akis:**
-1. Bilgisayarin MAC adresini tespit eder
-2. `POST /api/monitoring/devices/register/` endpoint'ine kayit istegi gonderir
-3. Cihaz zaten kayitliysa bilgi mesaji verir
+| Sayfa | URL |
+|---|---|
+| Dashboard | `http://127.0.0.1:8000/` |
+| Cihazlar | `http://127.0.0.1:8000/api/monitoring/ui/devices/` |
+| Uyarılar | `http://127.0.0.1:8000/api/monitoring/ui/alerts/` |
+| Admin Paneli | `http://127.0.0.1:8000/admin/` |
 
 ---
 
-## Gelistirici Notlari
+## Agent Nasıl Çalışır?
 
-- `DEBUG = True` sadece gelistirme ortami icindir, production'da `False` yapilmali
-- `SECRET_KEY` production'da degistirilmeli ve ortam degiskeninden okunmali
-- `ALLOWED_HOSTS` production'da sunucu IP/domain adresiyle guncellenmeli
+`agent.py` izlenecek bilgisayarda çalışır. İki aşamalıdır:
+
+**Başlangıç (bir kez):**
+1. MAC adresini tespit eder (`uuid.getnode()`)
+2. `POST /devices/register/` ile cihazı kaydeder
+3. `POST /hardware/` ile CPU/RAM/GPU/IP bilgilerini gönderir
+
+**Döngü (her 15 saniyede bir):**
+1. `psutil` ile anlık CPU, RAM, Disk, Ağ, Batarya verisi toplar
+2. En çok kaynak kullanan Top 10 işlemi belirler
+3. `POST /heartbeats/` ile sunucuya gönderir
+
+---
+
+## Veritabanı İndeksleri
+
+Performans için şu composite index'ler tanımlıdır:
+
+| Tablo | Index | Amaç |
+|---|---|---|
+| `HeartbeatLog` | `(device, timestamp DESC)` | Dashboard grafik sorguları |
+| `Alert` | `(is_resolved, created_at DESC)` | Çözülmemiş uyarı sorguları |
+| `Alert` | `(device, created_at DESC)` | Cihaza ait uyarı sorguları |
+| `Device` | `(is_active, last_seen)` | Pasif cihaz tespiti |
+
+---
+
+## Güvenlik Notları
+
+- `.env` dosyasını kesinlikle git'e commit etme — `.gitignore`'a ekli olduğundan emin ol
+- `DEBUG=True` sadece geliştirme ortamı içindir
+- Production'da `ALLOWED_HOSTS`'u sunucu domain/IP'siyle güncelle
+- `SECRET_KEY` production'da güçlü rastgele bir değer olmalı
