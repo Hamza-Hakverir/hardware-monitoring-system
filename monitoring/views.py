@@ -1,7 +1,7 @@
 from datetime import timedelta
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
-from django.db.models import Prefetch, Avg, Max
+from django.db.models import Avg, Max, Subquery, OuterRef, FloatField
 from django.conf import settings
 from django.core.paginator import Paginator
 import logging
@@ -132,34 +132,35 @@ def receive_heartbeat(request):
                                      severity=Alert.SEVERITY_WARNING, message=msg)
                 logger.info('WARNING alert: %s device=%s value=%.1f', alert_type, device.pk, value)
 
-        # Anomali tespiti: son 20 heartbeat ortalamasının 2×'ından yüksekse alert
-        ANOMALY_WINDOW = 20
-        ANOMALY_MULTIPLIER = 2.0
-        recent_hbs = list(device.heartbeats.exclude(pk=heartbeat.pk).values_list(
-            'cpu_percent', 'ram_percent'
-        )[:ANOMALY_WINDOW])
-        if len(recent_hbs) >= 5:
-            cpu_vals  = [r[0] for r in recent_hbs]
-            ram_vals  = [r[1] for r in recent_hbs]
-            cpu_base  = sum(cpu_vals) / len(cpu_vals)
-            ram_base  = sum(ram_vals) / len(ram_vals)
-            anomaly_checks = [
-                (heartbeat.cpu_percent, cpu_base, 'CPU_ANOMALY', 'CPU'),
-                (heartbeat.ram_percent, ram_base, 'RAM_ANOMALY', 'RAM'),
-            ]
-            for value, baseline, alert_type, label in anomaly_checks:
-                # Yalnızca baseline anlamlıysa (>5%) ve değer 2× üstündeyse
-                if baseline > 5 and value >= baseline * ANOMALY_MULTIPLIER:
-                    if (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
-                        msg = (f'{label} ani artış: %{value:.1f} '
-                               f'(son {len(recent_hbs)} ölçüm ort. %{baseline:.1f})')
-                        Alert.objects.create(device=device, alert_type=alert_type,
-                                             severity=Alert.SEVERITY_WARNING, message=msg)
-                        logger.info('ANOMALY alert: %s device=%s value=%.1f base=%.1f',
-                                    alert_type, device.pk, value, baseline)
+        # COUNT tek seferde: hem anomaly hem cleanup için kullanılır
+        total = device.heartbeats.count()
+
+        # Anomali tespiti: her 4. heartbeat'te çalışır (≈1 dakikada bir, 15sn × 4)
+        if total % 4 == 0:
+            ANOMALY_WINDOW = 20
+            ANOMALY_MULTIPLIER = 2.0
+            recent_hbs = list(device.heartbeats.exclude(pk=heartbeat.pk).values_list(
+                'cpu_percent', 'ram_percent'
+            )[:ANOMALY_WINDOW])
+            if len(recent_hbs) >= 5:
+                cpu_vals = [r[0] for r in recent_hbs]
+                ram_vals = [r[1] for r in recent_hbs]
+                cpu_base = sum(cpu_vals) / len(cpu_vals)
+                ram_base = sum(ram_vals) / len(ram_vals)
+                for value, baseline, alert_type, label in [
+                    (heartbeat.cpu_percent, cpu_base, 'CPU_ANOMALY', 'CPU'),
+                    (heartbeat.ram_percent, ram_base, 'RAM_ANOMALY', 'RAM'),
+                ]:
+                    if baseline > 5 and value >= baseline * ANOMALY_MULTIPLIER:
+                        if (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
+                            msg = (f'{label} ani artış: %{value:.1f} '
+                                   f'(son {len(recent_hbs)} ölçüm ort. %{baseline:.1f})')
+                            Alert.objects.create(device=device, alert_type=alert_type,
+                                                 severity=Alert.SEVERITY_WARNING, message=msg)
+                            logger.info('ANOMALY alert: %s device=%s value=%.1f base=%.1f',
+                                        alert_type, device.pk, value, baseline)
 
         # Otomatik temizleme: her CLEANUP_EVERY kayıtta bir eski heartbeat'leri sil
-        total = device.heartbeats.count()
         if total > HEARTBEAT_LIMIT + CLEANUP_EVERY:
             aggregate_completed_hours(device)
             # N. kaydın timestamp'ini bul, ondan eskilerini sil (ID listesi yüklemekten çok daha verimli)
@@ -359,11 +360,14 @@ def dashboard_view(request):
 
 def device_list_view(request):
     """Cihaz listesi sayfası — tüm cihazlar tablo halinde."""
-    mark_stale_devices_inactive()  # 2 dk sinyal gelmeyenleri pasif yap
-    latest_hb_qs = HeartbeatLog.objects.order_by('-timestamp')
-    qs = Device.objects.select_related('location', 'hardware').prefetch_related(
-        Prefetch('heartbeats', queryset=latest_hb_qs, to_attr='prefetched_heartbeats')
-    ).all()
+    mark_stale_devices_inactive()
+    # Correlated subquery: her cihaz için sadece en son heartbeat değerlerini çeker
+    # (tüm heartbeat'leri yüklayan Prefetch yerine — çok daha verimli)
+    latest_hb = HeartbeatLog.objects.filter(device=OuterRef('pk')).order_by('-timestamp')
+    qs = Device.objects.select_related('location', 'hardware').annotate(
+        latest_cpu=Subquery(latest_hb.values('cpu_percent')[:1], output_field=FloatField()),
+        latest_ram=Subquery(latest_hb.values('ram_percent')[:1], output_field=FloatField()),
+    )
     paginator = Paginator(qs, 20)
     page = paginator.get_page(request.GET.get('page'))
     return render(request, 'monitoring/device_list.html', {'devices': page, 'page_obj': page})

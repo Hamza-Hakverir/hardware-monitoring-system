@@ -66,16 +66,14 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% with lhb=device.prefetched_heartbeats.0 %}
-                            {% if lhb %}
+                            {% if device.latest_cpu != None %}
                                 <div class="d-flex flex-column gap-1" style="font-size:0.8rem; font-weight:600;">
-                                    <div class="text-primary"><i class="bi bi-activity me-1"></i> %{{ lhb.cpu_percent|floatformat:1 }}</div>
-                                    <div class="text-info"><i class="bi bi-memory me-1"></i> %{{ lhb.ram_percent|floatformat:1 }}</div>
+                                    <div class="text-primary"><i class="bi bi-activity me-1"></i> %{{ device.latest_cpu|floatformat:1 }}</div>
+                                    <div class="text-info"><i class="bi bi-memory me-1"></i> %{{ device.latest_ram|floatformat:1 }}</div>
                                 </div>
                             {% else %}
                                 <span class="text-muted fst-italic">—</span>
                             {% endif %}
-                            {% endwith %}
                         </td>
                         <td>
                             <small class="text-muted">{{ device.last_seen|date:"d M H:i:s" }}</small>
