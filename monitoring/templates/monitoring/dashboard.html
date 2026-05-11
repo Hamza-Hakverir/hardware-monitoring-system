@@ -96,17 +96,8 @@
         <div class="d-flex flex-wrap gap-2" id="heatmapGrid">
         {% for dev in devices_heatmap %}
             {% if dev.latest_cpu is not None %}
-                {% if dev.latest_cpu >= 90 %}
-                    {% with bg="#ef4444" fg="#fff" %}
-                {% elif dev.latest_cpu >= 75 %}
-                    {% with bg="#f97316" fg="#fff" %}
-                {% elif dev.latest_cpu >= 50 %}
-                    {% with bg="#eab308" fg="#000" %}
-                {% else %}
-                    {% with bg="#22c55e" fg="#fff" %}
-                {% endif %}
                 <a href="{% url 'ui_device_detail' pk=dev.mac_address %}"
-                   style="background:{{ bg }};color:{{ fg }};border-radius:10px;padding:.6rem .9rem;text-decoration:none;min-width:110px;text-align:center;opacity:{% if not dev.is_active %}0.45{% else %}1{% endif %}"
+                   style="background:{% if dev.latest_cpu >= 90 %}#ef4444{% elif dev.latest_cpu >= 75 %}#f97316{% elif dev.latest_cpu >= 50 %}#eab308{% else %}#22c55e{% endif %};color:{% if dev.latest_cpu >= 50 and dev.latest_cpu < 75 %}#000{% else %}#fff{% endif %};border-radius:10px;padding:.6rem .9rem;text-decoration:none;min-width:110px;text-align:center;opacity:{% if not dev.is_active %}0.45{% else %}1{% endif %}"
                    title="CPU: %{{ dev.latest_cpu|floatformat:1 }} | RAM: %{{ dev.latest_ram|floatformat:1 }}{% if not dev.is_active %} (Pasif){% endif %}">
                     <div style="font-size:.65rem;font-weight:700;opacity:.8">
                         {% if dev.hardware %}{{ dev.hardware.hostname|truncatechars:12 }}{% else %}{{ dev.mac_address|truncatechars:10 }}{% endif %}
@@ -114,7 +105,6 @@
                     <div style="font-size:1.3rem;font-weight:900;line-height:1.2">%{{ dev.latest_cpu|floatformat:0 }}</div>
                     <div style="font-size:.6rem;opacity:.8">CPU</div>
                 </a>
-                {% endwith %}
             {% else %}
                 <a href="{% url 'ui_device_detail' pk=dev.mac_address %}"
                    style="background:var(--dm-surface-2,#e5e7eb);color:var(--dm-text-muted);border-radius:10px;padding:.6rem .9rem;text-decoration:none;min-width:110px;text-align:center;opacity:{% if not dev.is_active %}0.5{% else %}0.8{% endif %}"
