@@ -1,0 +1,139 @@
+{% extends 'monitoring/base.html' %}
+{% block title %}Eşik Ayarları — {{ device.mac_address }}{% endblock %}
+
+{% block content %}
+<div class="dm-page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-sliders me-2"></i>Eşik Ayarları</h2>
+        <p class="text-muted mb-0">
+            <a href="{% url 'ui_device_detail' pk=device.mac_address %}" class="text-decoration-none">
+                <i class="bi bi-arrow-left me-1"></i>
+                {% if device.hardware %}{{ device.hardware.hostname }}{% else %}{{ device.mac_address }}{% endif %}
+            </a>
+        </p>
+    </div>
+</div>
+
+{% if errors %}
+<div class="alert alert-danger dm-animate">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong>Hata:</strong>
+    <ul class="mb-0 mt-1">
+        {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+<div class="row g-3">
+    <div class="col-lg-8">
+        <form method="post">
+            {% csrf_token %}
+            <div class="card dm-card dm-animate">
+                <div class="card-header">
+                    <h6 class="mb-0 fw-bold"><i class="bi bi-cpu me-2 text-primary"></i>CPU Eşikleri</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Uyarı <span class="dm-badge bg-warning text-dark ms-1">%</span></label>
+                            <div class="input-group">
+                                <input type="number" name="cpu_warning" class="form-control"
+                                       value="{{ threshold.cpu_warning }}" min="0" max="100" step="0.1" required>
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <small class="text-muted">Global: %{{ global_warn }}</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Kritik <span class="dm-badge bg-danger ms-1">%</span></label>
+                            <div class="input-group">
+                                <input type="number" name="cpu_critical" class="form-control"
+                                       value="{{ threshold.cpu_critical }}" min="0" max="100" step="0.1" required>
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <small class="text-muted">Global: %{{ global_crit }}</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card dm-card dm-animate mt-3">
+                <div class="card-header">
+                    <h6 class="mb-0 fw-bold"><i class="bi bi-memory me-2 text-info"></i>RAM Eşikleri</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Uyarı</label>
+                            <div class="input-group">
+                                <input type="number" name="ram_warning" class="form-control"
+                                       value="{{ threshold.ram_warning }}" min="0" max="100" step="0.1" required>
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Kritik</label>
+                            <div class="input-group">
+                                <input type="number" name="ram_critical" class="form-control"
+                                       value="{{ threshold.ram_critical }}" min="0" max="100" step="0.1" required>
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card dm-card dm-animate mt-3">
+                <div class="card-header">
+                    <h6 class="mb-0 fw-bold"><i class="bi bi-hdd me-2 text-warning"></i>Disk Eşikleri</h6>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Uyarı</label>
+                            <div class="input-group">
+                                <input type="number" name="disk_warning" class="form-control"
+                                       value="{{ threshold.disk_warning }}" min="0" max="100" step="0.1" required>
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-medium">Kritik</label>
+                            <div class="input-group">
+                                <input type="number" name="disk_critical" class="form-control"
+                                       value="{{ threshold.disk_critical }}" min="0" max="100" step="0.1" required>
+                                <span class="input-group-text">%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-dm-primary">
+                    <i class="bi bi-check-circle me-1"></i>Kaydet
+                </button>
+                <a href="{% url 'ui_device_detail' pk=device.mac_address %}" class="btn btn-outline-secondary">
+                    <i class="bi bi-x me-1"></i>İptal
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card dm-card">
+            <div class="card-header">
+                <h6 class="mb-0 fw-bold"><i class="bi bi-info-circle me-2"></i>Bilgi</h6>
+            </div>
+            <div class="card-body" style="font-size:.85rem">
+                <p class="text-muted mb-2">Bu cihaza özel eşikler, global ayarları (<strong>%{{ global_warn }}</strong> uyarı / <strong>%{{ global_crit }}</strong> kritik) geçersiz kılar.</p>
+                <ul class="text-muted ps-3 mb-0">
+                    <li>Uyarı eşiği aşılınca <span class="dm-badge bg-warning text-dark">WARNING</span> alert üretilir</li>
+                    <li>Kritik eşiği aşılınca <span class="dm-badge bg-danger">CRITICAL</span> alert + e-posta gönderilir</li>
+                    <li>Değerler 0–100 arasında olmalıdır</li>
+                    <li>Uyarı her zaman kritikten küçük olmalıdır</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -87,6 +87,7 @@ DATABASES = {
         'PASSWORD': os.getenv('DB_PASSWORD', ''),
         'HOST': os.getenv('DB_HOST', 'localhost'),
         'PORT': os.getenv('DB_PORT', '5432'),
+        'CONN_MAX_AGE': int(os.getenv('CONN_MAX_AGE', '60')),  # kalıcı bağlantı (sn)
         'OPTIONS': {
             'sslmode': os.getenv('DB_SSLMODE', 'prefer'),
         },
@@ -131,11 +132,35 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 STATIC_URL = "static/"
 
+# In-process cache (Celery/Redis gerektirmez; tek worker için yeterli)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'devmonitor-cache',
+    }
+}
+
 # DevMonitor — Alert eşik değerleri (%)
 ALERT_WARNING_THRESHOLD  = float(os.getenv('ALERT_WARNING_THRESHOLD',  '75.0'))
 ALERT_CRITICAL_THRESHOLD = float(os.getenv('ALERT_CRITICAL_THRESHOLD', '90.0'))
 # Geriye dönük uyumluluk için eski isim de kalsın
 ALERT_THRESHOLD = ALERT_CRITICAL_THRESHOLD
+
+# DevMonitor — E-posta bildirimi (CRITICAL alertlerde admin'e mail)
+# Yapılandırmak için .env dosyasına şunları ekleyin:
+#   EMAIL_HOST=smtp.gmail.com
+#   EMAIL_PORT=587
+#   EMAIL_HOST_USER=you@gmail.com
+#   EMAIL_HOST_PASSWORD=uygulama-sifresi
+#   ADMIN_ALERT_EMAIL=admin@ornek.com
+EMAIL_BACKEND       = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.smtp.EmailBackend')
+EMAIL_HOST          = os.getenv('EMAIL_HOST', '')
+EMAIL_PORT          = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_HOST_USER     = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+EMAIL_USE_TLS       = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+DEFAULT_FROM_EMAIL  = os.getenv('DEFAULT_FROM_EMAIL', 'DevMonitor <devmonitor@localhost>')
+ADMIN_ALERT_EMAIL   = os.getenv('ADMIN_ALERT_EMAIL', '')  # Bildirim alacak adres
 
 # Logging
 LOGGING = {

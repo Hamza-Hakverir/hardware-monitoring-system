@@ -80,6 +80,58 @@
     </div>
 </div>
 
+<!-- CPU Yük Haritası -->
+{% if devices_heatmap %}
+<div class="card dm-card dm-animate dm-animate-delay-4 mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6><i class="bi bi-grid-3x3-gap me-2"></i>CPU Yük Haritası</h6>
+        <div class="d-flex gap-2 align-items-center" style="font-size:.72rem;color:var(--dm-text-muted)">
+            <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px"></span> &lt;50%</span>
+            <span><span style="display:inline-block;width:10px;height:10px;background:#eab308;border-radius:2px"></span> 50–75%</span>
+            <span><span style="display:inline-block;width:10px;height:10px;background:#f97316;border-radius:2px"></span> 75–90%</span>
+            <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px"></span> &gt;90%</span>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="d-flex flex-wrap gap-2" id="heatmapGrid">
+        {% for dev in devices_heatmap %}
+            {% if dev.latest_cpu is not None %}
+                {% if dev.latest_cpu >= 90 %}
+                    {% with bg="#ef4444" fg="#fff" %}
+                {% elif dev.latest_cpu >= 75 %}
+                    {% with bg="#f97316" fg="#fff" %}
+                {% elif dev.latest_cpu >= 50 %}
+                    {% with bg="#eab308" fg="#000" %}
+                {% else %}
+                    {% with bg="#22c55e" fg="#fff" %}
+                {% endif %}
+                <a href="{% url 'ui_device_detail' pk=dev.mac_address %}"
+                   style="background:{{ bg }};color:{{ fg }};border-radius:10px;padding:.6rem .9rem;text-decoration:none;min-width:110px;text-align:center;opacity:{% if not dev.is_active %}0.45{% else %}1{% endif %}"
+                   title="CPU: %{{ dev.latest_cpu|floatformat:1 }} | RAM: %{{ dev.latest_ram|floatformat:1 }}{% if not dev.is_active %} (Pasif){% endif %}">
+                    <div style="font-size:.65rem;font-weight:700;opacity:.8">
+                        {% if dev.hardware %}{{ dev.hardware.hostname|truncatechars:12 }}{% else %}{{ dev.mac_address|truncatechars:10 }}{% endif %}
+                    </div>
+                    <div style="font-size:1.3rem;font-weight:900;line-height:1.2">%{{ dev.latest_cpu|floatformat:0 }}</div>
+                    <div style="font-size:.6rem;opacity:.8">CPU</div>
+                </a>
+                {% endwith %}
+            {% else %}
+                <a href="{% url 'ui_device_detail' pk=dev.mac_address %}"
+                   style="background:var(--dm-surface-2,#e5e7eb);color:var(--dm-text-muted);border-radius:10px;padding:.6rem .9rem;text-decoration:none;min-width:110px;text-align:center;opacity:{% if not dev.is_active %}0.5{% else %}0.8{% endif %}"
+                   title="Veri yok{% if not dev.is_active %} (Pasif){% endif %}">
+                    <div style="font-size:.65rem;font-weight:700">
+                        {% if dev.hardware %}{{ dev.hardware.hostname|truncatechars:12 }}{% else %}{{ dev.mac_address|truncatechars:10 }}{% endif %}
+                    </div>
+                    <div style="font-size:1.3rem;font-weight:900;line-height:1.2">—</div>
+                    <div style="font-size:.6rem">Veri yok</div>
+                </a>
+            {% endif %}
+        {% endfor %}
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Son Uyarılar Tablosu -->
 <div class="card dm-card dm-animate dm-animate-delay-4">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -154,8 +206,8 @@
 let statusChart, alertChart;
 const activeCount = {{ active_devices|default:0 }};
 const inactiveCount = {{ inactive_devices|default:0 }};
-// Cihaz detay URL şablonu — Django URL sistemine bağlı kalmak için
 const DEVICE_DETAIL_BASE = "{% url 'ui_device_detail' pk='__MAC__' %}".replace('__MAC__', '');
+const typeColors = {'CPU_HIGH':'#ef476f','RAM_HIGH':'#ffd166','DISK_FULL':'#118ab2','CPU_ANOMALY':'#f77f00','RAM_ANOMALY':'#9b5de5'};
 
 function initCharts() {
     const statusCtx = document.getElementById('deviceStatusChart');
@@ -184,12 +236,10 @@ function initCharts() {
     }
 
     const alertCtx = document.getElementById('alertTypeChart');
-    const alertData = {};
-    {% for alert in recent_alerts %}
-        alertData['{{ alert.alert_type }}'] = (alertData['{{ alert.alert_type }}'] || 0) + 1;
-    {% endfor %}
-    const alertLabels = Object.keys(alertData);
-    const alertValues = Object.values(alertData);
+    // Çözülmemiş alert türleri — API'den gelen gerçek dağılım
+    const alertTypeCounts = {{ alert_type_counts|safe }};
+    const alertLabels = alertTypeCounts.map(x => x.alert_type);
+    const alertValues = alertTypeCounts.map(x => x.count);
 
     if (alertLabels.length > 0) {
         alertChart = new Chart(alertCtx, {
@@ -197,9 +247,9 @@ function initCharts() {
             data: {
                 labels: alertLabels,
                 datasets: [{
-                    label: 'Uyarı Sayısı',
+                    label: 'Bekleyen Uyarı',
                     data: alertValues,
-                    backgroundColor: ['#ef476f', '#ffd166', '#118ab2', '#06d6a0', '#073b4c'],
+                    backgroundColor: alertLabels.map(l => typeColors[l] || '#636e72'),
                     borderRadius: 8,
                     borderSkipped: false,
                 }]
@@ -207,16 +257,14 @@ function initCharts() {
             options: {
                 responsive: true,
                 scales: {
-                    y: { beginAtZero: true, ticks: { stepSize: 1 } },
-                    x: { grid: { display: false } }
+                    y: { beginAtZero: true, ticks: { stepSize: 1, font:{size:9} } },
+                    x: { grid: { display: false }, ticks:{font:{size:9}} }
                 },
-                plugins: {
-                    legend: { display: false }
-                }
+                plugins: { legend: { display: false } }
             }
         });
     } else {
-        alertCtx.parentElement.innerHTML = '<p class="text-muted text-center py-5" id="noAlertMsg"><i class="bi bi-bar-chart" style="font-size:2rem;"></i><br><br>Henüz uyarı verisi yok</p>';
+        alertCtx.parentElement.innerHTML = '<p class="text-muted text-center py-5" id="noAlertMsg"><i class="bi bi-bar-chart" style="font-size:2rem;"></i><br><br>Bekleyen uyarı yok</p>';
     }
 }
 
@@ -254,14 +302,11 @@ function refreshDashboard() {
             location.reload();
         }
 
-        // 3. Bar Grafiğini Güncelle (Son Uyarı Türleri)
-        const typeCount = {};
-        data.recent_alerts.forEach(a => {
-            typeCount[a.alert_type] = (typeCount[a.alert_type] || 0) + 1;
-        });
-        if (alertChart && Object.keys(typeCount).length > 0) {
-            alertChart.data.labels = Object.keys(typeCount);
-            alertChart.data.datasets[0].data = Object.values(typeCount);
+        // 3. Bar Grafiğini Güncelle (Çözülmemiş uyarı türleri — gerçek dağılım)
+        if (alertChart && data.alert_type_counts) {
+            alertChart.data.labels = data.alert_type_counts.map(x => x.alert_type);
+            alertChart.data.datasets[0].data = data.alert_type_counts.map(x => x.count);
+            alertChart.data.datasets[0].backgroundColor = alertChart.data.labels.map(l => typeColors[l] || '#636e72');
             alertChart.update('none');
         }
 

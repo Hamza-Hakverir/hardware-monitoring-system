@@ -18,7 +18,8 @@
            TASARIM SİSTEMİ — Custom CSS
            ============================================================ */
 
-        :root {
+        :root,
+        [data-bs-theme="light"] {
             --dm-primary: #4361ee;
             --dm-primary-dark: #3a56d4;
             --dm-success: #06d6a0;
@@ -32,9 +33,23 @@
             --dm-text: #2d3436;
             --dm-text-muted: #636e72;
             --dm-border: #e9ecef;
+            --dm-surface: #f8f9fc;
+            --dm-surface-2: #f0f2f5;
             --dm-shadow: 0 2px 12px rgba(0,0,0,0.08);
             --dm-shadow-hover: 0 4px 20px rgba(0,0,0,0.12);
             --dm-radius: 12px;
+        }
+
+        [data-bs-theme="dark"] {
+            --dm-body-bg: #0d1117;
+            --dm-card-bg: #161b22;
+            --dm-text: #e6edf3;
+            --dm-text-muted: #8b949e;
+            --dm-border: #30363d;
+            --dm-surface: #21262d;
+            --dm-surface-2: #1c2128;
+            --dm-shadow: 0 2px 12px rgba(0,0,0,0.4);
+            --dm-shadow-hover: 0 4px 20px rgba(0,0,0,0.6);
         }
 
         body {
@@ -42,6 +57,7 @@
             background-color: var(--dm-body-bg);
             color: var(--dm-text);
             font-size: 0.9rem;
+            transition: background-color 0.2s, color 0.2s;
         }
 
         /* --- NAVBAR --- */
@@ -146,9 +162,10 @@
         /* --- TABLOLAR --- */
         .dm-table {
             margin: 0;
+            color: var(--dm-text);
         }
         .dm-table thead {
-            background: #f8f9fc;
+            background: var(--dm-surface);
         }
         .dm-table thead th {
             font-weight: 600;
@@ -160,9 +177,10 @@
         }
         .dm-table tbody tr {
             transition: background 0.15s ease;
+            border-color: var(--dm-border);
         }
         .dm-table tbody tr:hover {
-            background: #f8f9fc;
+            background: var(--dm-surface);
         }
 
         /* --- BADGE'LER --- */
@@ -177,7 +195,7 @@
         .dm-progress {
             height: 6px;
             border-radius: 3px;
-            background: #e9ecef;
+            background: var(--dm-border);
         }
 
         /* --- BUTONLAR --- */
@@ -204,6 +222,8 @@
             padding: 0.6rem 1rem 0.6rem 2.5rem;
             font-size: 0.9rem;
             transition: border-color 0.2s ease;
+            background-color: var(--dm-card-bg);
+            color: var(--dm-text);
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%23636e72' viewBox='0 0 16 16'%3E%3Cpath d='M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z'/%3E%3C/svg%3E");
             background-repeat: no-repeat;
             background-position: 0.8rem center;

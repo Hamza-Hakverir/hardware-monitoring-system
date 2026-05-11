@@ -215,8 +215,21 @@ def get_realtime_usage():
     except Exception:
         pass
 
-    # --- Ağ ---
+    # --- Ağ (toplam + arayüz bazında) ---
     net_io = psutil.net_io_counters()
+    net_per_nic: dict = {}
+    try:
+        for nic, stats in psutil.net_io_counters(pernic=True).items():
+            if nic.lower().startswith('lo') or 'loopback' in nic.lower():
+                continue
+            net_per_nic[nic] = {
+                'bytes_sent':   stats.bytes_sent,
+                'bytes_recv':   stats.bytes_recv,
+                'packets_sent': stats.packets_sent,
+                'packets_recv': stats.packets_recv,
+            }
+    except Exception:
+        pass
 
     # --- Batarya ---
     battery_pct, battery_plug = get_battery_info()
@@ -232,7 +245,7 @@ def get_realtime_usage():
         # Ana metrikler (cpu_times_percent zaten 1sn ölçtü, idle dışı = kullanım)
         "cpu_percent": round(100.0 - cpu_times.idle, 1),
         "ram_percent": mem.percent,
-        "disk_percent": psutil.disk_usage('/').percent,
+        "disk_percent": psutil.disk_usage('C:\\' if platform.system() == 'Windows' else '/').percent,
         "process_count": len(pids),
         "battery_percent": battery_pct,
         "battery_plugged": battery_plug,
@@ -260,10 +273,11 @@ def get_realtime_usage():
         "disk_partitions": disk_parts,
 
         # Ağ
-        "net_bytes_sent": net_io.bytes_sent,
-        "net_bytes_recv": net_io.bytes_recv,
+        "net_bytes_sent":   net_io.bytes_sent,
+        "net_bytes_recv":   net_io.bytes_recv,
         "net_packets_sent": net_io.packets_sent,
         "net_packets_recv": net_io.packets_recv,
+        "net_per_nic":      net_per_nic,
 
         # Top işlemler (JSON)
         "top_processes": top_procs,
@@ -274,33 +288,38 @@ def get_realtime_usage():
 # API FONKSİYONLARI
 # ============================================================
 
-def register_device(info):
+def register_device(info) -> str | None:
+    """Cihazı kaydeder / doğrular. Sunucudan dönen token'ı döndürür."""
     payload = {
         "mac_address": info["mac_address"],
         "os_info": info["os_info"],
-        "is_active": True,
     }
     delays = [5, 10, 20, 30, 60]
     for attempt, delay in enumerate(delays, start=1):
         try:
             response = requests.post(f"{SERVER_URL}/devices/register/", json=payload, timeout=5)
             if response.status_code == 201:
-                print("[OK] Cihaz başarıyla kaydedildi.")
-            elif response.status_code == 400 and "mac_address" in response.text:
-                print("[INFO] Bu cihaz zaten sistemde kayıtlı.")
+                data = response.json()
+                print(f"[OK] Cihaz kaydedildi. Token: {data.get('token', '')[:8]}…")
+                return data.get('token')
+            elif response.status_code == 200:
+                data = response.json()
+                print("[INFO] Bu cihaz zaten kayıtlı. Token alındı.")
+                return data.get('token')
             else:
                 print(f"[HATA] Kayıt: {response.text}")
-            return
+                return None
         except requests.exceptions.ConnectionError:
             if attempt < len(delays):
                 print(f"[HATA] Sunucuya ulaşılamıyor. {delay}sn sonra tekrar deneniyor... ({attempt}/{len(delays)})")
                 time.sleep(delay)
             else:
-                print("[HATA] Sunucu {len(delays)} denemede de yanıt vermedi. Agent durduruluyor.")
+                print(f"[HATA] Sunucu {len(delays)} denemede de yanıt vermedi. Agent durduruluyor.")
                 raise SystemExit(1)
+    return None
 
 
-def send_hardware_spec(info):
+def send_hardware_spec(info, token: str | None):
     payload = {
         "device": info["mac_address"],
         "cpu_info": info["cpu_info"],
@@ -311,17 +330,21 @@ def send_hardware_spec(info):
         "cpu_cores": info["cpu_cores"],
         "cpu_threads": info["cpu_threads"],
     }
+    headers = {"Authorization": f"Token {token}"} if token else {}
     try:
-        response = requests.post(f"{SERVER_URL}/hardware/", json=payload, timeout=5)
+        response = requests.post(f"{SERVER_URL}/hardware/", json=payload, headers=headers, timeout=5)
         if response.status_code in (200, 201):
             print("[OK] Donanım bilgisi güncellendi.")
+        elif response.status_code == 401:
+            print("[HATA] Donanım: Geçersiz token — sunucuda token doğrulaması başarısız.")
         else:
             print(f"[HATA] Donanım: {response.text}")
     except requests.exceptions.ConnectionError:
         print("[HATA] Donanım bilgisi gönderilemedi.")
 
 
-def send_heartbeat(mac_address, usage):
+def send_heartbeat(mac_address, token: str | None, usage):
+    headers = {"Authorization": f"Token {token}"} if token else {}
     payload = {
         "device": mac_address,
         # Ana
@@ -351,15 +374,16 @@ def send_heartbeat(mac_address, usage):
         "disk_write_bytes": usage["disk_write_bytes"],
         "disk_partitions": usage["disk_partitions"],
         # Ağ
-        "net_bytes_sent": usage["net_bytes_sent"],
-        "net_bytes_recv": usage["net_bytes_recv"],
+        "net_bytes_sent":   usage["net_bytes_sent"],
+        "net_bytes_recv":   usage["net_bytes_recv"],
         "net_packets_sent": usage["net_packets_sent"],
         "net_packets_recv": usage["net_packets_recv"],
+        "net_per_nic":      usage.get("net_per_nic", {}),
         # Top işlemler
         "top_processes": usage["top_processes"],
     }
     try:
-        response = requests.post(f"{SERVER_URL}/heartbeats/", json=payload, timeout=10)
+        response = requests.post(f"{SERVER_URL}/heartbeats/", json=payload, headers=headers, timeout=10)
         if response.status_code == 201:
             bat_str = ""
             if usage["battery_percent"] is not None:
@@ -379,6 +403,8 @@ def send_heartbeat(mac_address, usage):
                 f"Ağ: ↓{net_mb:.0f}MB"
                 f"{bat_str}"
             )
+        elif response.status_code == 401:
+            print("[HATA] Heartbeat: Geçersiz token — sunucuya erişim reddedildi.")
         else:
             print(f"[HATA] Heartbeat: {response.text[:200]}")
     except requests.exceptions.ConnectionError:
@@ -395,6 +421,8 @@ if __name__ == "__main__":
                         help=f'Sunucu adresi (varsayılan: {SERVER_URL})')
     parser.add_argument('--interval', type=int, default=HEARTBEAT_INTERVAL,
                         help=f'Heartbeat aralığı saniye cinsinden (varsayılan: {HEARTBEAT_INTERVAL})')
+    parser.add_argument('--token', default=None,
+                        help='API token (verilmezse sunucudan otomatik alınır)')
     args = parser.parse_args()
     SERVER_URL = args.server.rstrip('/')
     HEARTBEAT_INTERVAL = args.interval
@@ -422,8 +450,14 @@ if __name__ == "__main__":
         print("[Batarya]  Yok (Masaüstü)")
 
     print("-" * 60)
-    register_device(info)
-    send_hardware_spec(info)
+    fetched_token = register_device(info)
+    token = args.token or fetched_token
+    if not token:
+        print("[UYARI] Token alınamadı — heartbeat'ler sunucu tarafından reddedilebilir.")
+    else:
+        print(f"[TOKEN]    {'(argümandan)' if args.token else '(sunucudan)'} {token[:8]}…")
+
+    send_hardware_spec(info, token)
     print("-" * 60)
     print(f"[LOOP] Her {HEARTBEAT_INTERVAL}sn'de bir detaylı veri gönderiliyor...")
     print("[LOOP] Toplanan: CPU+RAM+Disk+Ağ+İşlemler+Batarya")
@@ -433,7 +467,7 @@ if __name__ == "__main__":
     try:
         while True:
             usage = get_realtime_usage()
-            send_heartbeat(info["mac_address"], usage)
+            send_heartbeat(info["mac_address"], token, usage)
             time.sleep(HEARTBEAT_INTERVAL)
     except KeyboardInterrupt:
         print("\n[STOP] Ajan durduruldu.")

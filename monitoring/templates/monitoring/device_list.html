@@ -7,12 +7,26 @@
 <div class="dm-page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h2 class="mb-1"><i class="bi bi-pc-display me-2"></i>Cihaz Listesi</h2>
-        <p class="text-muted mb-0">Toplam {{ devices|length }} cihaz kayıtlı</p>
+        <p class="text-muted mb-0">Toplam {{ devices|length }} cihaz{% if selected_tag %} — "<strong>{{ selected_tag }}</strong>" etiketi{% endif %}</p>
     </div>
     <div>
         <input type="text" id="deviceSearch" class="form-control dm-search" placeholder="Cihaz ara (MAC, OS, konum...)">
     </div>
 </div>
+
+{% if all_tags %}
+<div class="d-flex flex-wrap gap-2 mb-3 align-items-center">
+    <span class="text-muted" style="font-size:.8rem"><i class="bi bi-tags me-1"></i>Etiket:</span>
+    <a href="?" class="btn btn-sm {% if not selected_tag %}btn-secondary{% else %}btn-outline-secondary{% endif %}" style="font-size:.8rem;padding:.25rem .6rem">Tümü</a>
+    {% for tag in all_tags %}
+    <a href="?tag={{ tag.name|urlencode }}"
+       class="btn btn-sm"
+       style="font-size:.8rem;padding:.25rem .6rem;background:{% if selected_tag == tag.name %}{{ tag.color }}{% else %}transparent{% endif %};color:{% if selected_tag == tag.name %}#fff{% else %}{{ tag.color }}{% endif %};border:1px solid {{ tag.color }}">
+        {{ tag.name }}
+    </a>
+    {% endfor %}
+</div>
+{% endif %}
 
 <!-- Cihaz Tablosu -->
 <div class="card dm-card dm-animate">
@@ -45,6 +59,13 @@
                                 {% endif %}
                             </div>
                             <small class="text-muted">{{ device.mac_address }}</small>
+                            {% if device.tags.all %}
+                            <div class="d-flex flex-wrap gap-1 mt-1">
+                                {% for tag in device.tags.all %}
+                                <span style="display:inline-block;background:{{ tag.color }};color:#fff;border-radius:4px;padding:1px 6px;font-size:.65rem;font-weight:600">{{ tag.name }}</span>
+                                {% endfor %}
+                            </div>
+                            {% endif %}
                         </td>
                         <td>{{ device.os_info }}</td>
                         <td>
@@ -121,17 +142,17 @@
 <nav class="mt-3 d-flex justify-content-center">
     <ul class="pagination">
         {% if page_obj.has_previous %}
-        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}"><i class="bi bi-chevron-left"></i></a></li>
+        <li class="page-item"><a class="page-link" href="?{% if selected_tag %}tag={{ selected_tag|urlencode }}&{% endif %}page={{ page_obj.previous_page_number }}"><i class="bi bi-chevron-left"></i></a></li>
         {% endif %}
         {% for num in page_obj.paginator.page_range %}
             {% if page_obj.number == num %}
             <li class="page-item active"><span class="page-link">{{ num }}</span></li>
             {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
-            <li class="page-item"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>
+            <li class="page-item"><a class="page-link" href="?{% if selected_tag %}tag={{ selected_tag|urlencode }}&{% endif %}page={{ num }}">{{ num }}</a></li>
             {% endif %}
         {% endfor %}
         {% if page_obj.has_next %}
-        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}"><i class="bi bi-chevron-right"></i></a></li>
+        <li class="page-item"><a class="page-link" href="?{% if selected_tag %}tag={{ selected_tag|urlencode }}&{% endif %}page={{ page_obj.next_page_number }}"><i class="bi bi-chevron-right"></i></a></li>
         {% endif %}
     </ul>
 </nav>

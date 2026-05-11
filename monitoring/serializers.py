@@ -9,7 +9,7 @@ from .models import Device, Location, HardwareSpec, HeartbeatLog, Alert
 class DeviceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Device
-        fields = '__all__'
+        fields = ['mac_address', 'os_info', 'is_active', 'last_seen', 'created_at', 'went_online_at']
 
 
 class LocationSerializer(serializers.ModelSerializer):
@@ -28,6 +28,21 @@ class HeartbeatLogSerializer(serializers.ModelSerializer):
     class Meta:
         model = HeartbeatLog
         fields = '__all__'
+
+
+class HeartbeatChartSerializer(serializers.ModelSerializer):
+    """device_stats endpoint için sadece grafik alanları — tam serializer'ın ~yarısı kadar veri."""
+    class Meta:
+        model = HeartbeatLog
+        fields = [
+            'timestamp',
+            'cpu_percent', 'ram_percent', 'disk_percent',
+            'net_bytes_sent', 'net_bytes_recv',
+            'net_packets_sent', 'net_packets_recv',
+            'disk_read_bytes', 'disk_write_bytes',
+            'memory_used', 'memory_cached', 'memory_available',
+            'battery_percent', 'battery_plugged', 'process_count',
+        ]
 
 
 class AlertSerializer(serializers.ModelSerializer):

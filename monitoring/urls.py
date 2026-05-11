@@ -10,8 +10,9 @@ urlpatterns = [
     path('devices/', views.list_devices, name='list_devices'),
     path('devices/register/', views.register_device, name='register_device'),
     path('devices/<str:pk>/', views.device_detail, name='device_detail'),
-    path('devices/<str:pk>/stats/', views.device_stats, name='device_stats'),  # YENİ: Chart.js verisi
-    path('devices/<str:pk>/hourly/', views.device_hourly_trend, name='device_hourly_trend'),  # YENİ: Saatlik trend
+    path('devices/<str:pk>/stats/', views.device_stats, name='device_stats'),
+    path('devices/<str:pk>/hourly/', views.device_hourly_trend, name='device_hourly_trend'),
+    path('devices/<str:pk>/status-log/', views.device_status_log, name='device_status_log'),
 
     # Heartbeats
     path('heartbeats/', views.receive_heartbeat, name='receive_heartbeat'),
@@ -40,4 +41,8 @@ urlpatterns = [
     path('ui/alerts/', views.alert_list_view, name='ui_alert_list'),
     path('ui/add-location/', views.add_location_view, name='ui_add_location'),
     path('ui/add-alert/', views.add_alert_view, name='ui_add_alert'),
+    path('ui/devices/<str:pk>/threshold/', views.device_threshold_view, name='ui_device_threshold'),
+    path('ui/devices/<str:pk>/tags/', views.manage_device_tags_view, name='ui_device_tags'),
+    path('ui/devices/<str:pk>/export/heartbeats/', views.device_heartbeats_csv, name='ui_heartbeats_csv'),
+    path('ui/alerts/export/', views.alerts_csv, name='ui_alerts_csv'),
 ]

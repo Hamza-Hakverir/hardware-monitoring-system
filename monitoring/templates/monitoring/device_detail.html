@@ -9,8 +9,9 @@
 .dm-section{scroll-margin-top:70px;margin-bottom:2rem}
 .dm-section-title{font-weight:700;font-size:1.1rem;margin-bottom:1rem;padding-bottom:.5rem;border-bottom:2px solid var(--dm-border)}
 .dm-info-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.75rem}
-.dm-info-item{background:#f8f9fc;border-radius:10px;padding:1rem;text-align:center}
+.dm-info-item{background:var(--dm-surface);border-radius:10px;padding:1rem;text-align:center}
 .dm-info-item .label{font-size:.7rem;text-transform:uppercase;letter-spacing:.5px;color:var(--dm-text-muted);font-weight:600}
+.dm-info-item .value{color:var(--dm-text)}
 .dm-info-item .value{font-size:1.3rem;font-weight:800;margin-top:.25rem}
 .dm-process-table{font-size:.8rem}
 .dm-process-table th{font-size:.7rem;text-transform:uppercase;letter-spacing:.5px}
@@ -29,8 +30,17 @@
             <i class="bi bi-ethernet me-1"></i>{{ device.mac_address }} · {{ device.os_info }}
             {% if hardware.ip_address %} · <i class="bi bi-globe me-1"></i>{{ hardware.ip_address }}{% endif %}
         </p>
+        {% if device.tags.all %}
+        <div class="d-flex flex-wrap gap-1 mt-1">
+            {% for tag in device.tags.all %}
+            <span class="dm-badge" style="background:{{ tag.color }};color:#fff;font-size:.7rem">
+                <i class="bi bi-tag me-1"></i>{{ tag.name }}
+            </span>
+            {% endfor %}
+        </div>
+        {% endif %}
     </div>
-    <div class="d-flex align-items-center gap-2">
+    <div class="d-flex align-items-center gap-2 flex-wrap">
         {% if device.is_active %}
             <span class="dm-badge bg-success px-3 py-2"><span class="dm-live-dot me-1" style="width:6px;height:6px;vertical-align:middle"></span>Aktif</span>
         {% else %}
@@ -41,6 +51,15 @@
         <span class="dm-badge bg-success px-2 py-1" style="font-size:.7rem"><i class="bi bi-clock-history me-1"></i>{{ device.uptime_display }}</span>
         {% endif %}
         <span class="dm-badge bg-dark px-2 py-1" style="font-size:.65rem"><span class="dm-live-dot me-1" style="width:5px;height:5px;vertical-align:middle"></span>15sn</span>
+        <a href="{% url 'ui_device_threshold' pk=device.mac_address %}" class="btn btn-sm btn-outline-secondary" title="Eşik Ayarları">
+            <i class="bi bi-sliders me-1"></i>Eşikler{% if threshold %}<span class="dm-badge bg-primary ms-1" style="font-size:.6rem">Özel</span>{% endif %}
+        </a>
+        <a href="{% url 'ui_device_tags' pk=device.mac_address %}" class="btn btn-sm btn-outline-secondary" title="Etiketleri Düzenle">
+            <i class="bi bi-tags me-1"></i>Etiketler
+        </a>
+        <a href="{% url 'ui_heartbeats_csv' pk=device.mac_address %}?limit=200" class="btn btn-sm btn-outline-secondary" title="Son 200 heartbeat CSV">
+            <i class="bi bi-download me-1"></i>CSV
+        </a>
     </div>
 </div>
 
@@ -52,6 +71,7 @@
         <a href="#bellek" class="btn btn-outline-secondary btn-sm" data-section="bellek"><i class="bi bi-memory me-1"></i>Bellek</a>
         <a href="#disk" class="btn btn-outline-secondary btn-sm" data-section="disk"><i class="bi bi-hdd me-1"></i>Disk</a>
         <a href="#ag" class="btn btn-outline-secondary btn-sm" data-section="ag"><i class="bi bi-wifi me-1"></i>Ağ</a>
+        <a href="#timeline" class="btn btn-outline-secondary btn-sm" data-section="timeline"><i class="bi bi-calendar3 me-1"></i>Zaman Çizelgesi</a>
     </div>
 </div>
 
@@ -178,7 +198,7 @@
                 {% for pct in latest_hb.cpu_per_core %}
                 <div style="width:56px;text-align:center">
                     <div style="font-size:.65rem;color:var(--dm-text-muted);font-weight:600">C{{ forloop.counter0 }}</div>
-                    <div style="height:60px;background:#f0f2f5;border-radius:6px;position:relative;overflow:hidden;margin:.25rem 0">
+                    <div style="height:60px;background:var(--dm-surface-2);border-radius:6px;position:relative;overflow:hidden;margin:.25rem 0">
                         <div style="position:absolute;bottom:0;left:0;right:0;height:{{ pct }}%;background:{% if pct >= 90 %}var(--dm-danger){% elif pct >= 75 %}var(--dm-warning){% else %}var(--dm-primary){% endif %};border-radius:6px;transition:height .4s"></div>
                     </div>
                     <div style="font-size:.7rem;font-weight:700">{{ pct|floatformat:0 }}%</div>
@@ -283,6 +303,36 @@
     </div>
     <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Ağ Giriş/Çıkış</h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="netChart" height="90"></canvas></div></div>
+
+    {% if latest_hb.net_per_nic %}
+    <div class="card dm-card mt-3">
+        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-diagram-3 me-2"></i>Arayüz Bazında İstatistikler</h6></div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table dm-table table-hover align-middle mb-0" style="font-size:.8rem">
+                    <thead><tr>
+                        <th class="px-4 py-2">Arayüz</th>
+                        <th class="py-2 text-end">Alınan</th>
+                        <th class="py-2 text-end">Gönderilen</th>
+                        <th class="py-2 text-end">Gelen Paket</th>
+                        <th class="py-2 text-end px-4">Giden Paket</th>
+                    </tr></thead>
+                    <tbody>
+                        {% for nic, stats in latest_hb.net_per_nic.items %}
+                        <tr>
+                            <td class="px-4 fw-medium"><i class="bi bi-ethernet me-1 text-muted"></i>{{ nic }}</td>
+                            <td class="text-end" style="color:var(--dm-success)">{{ stats.bytes_recv|filesizeformat }}</td>
+                            <td class="text-end" style="color:var(--dm-primary)">{{ stats.bytes_sent|filesizeformat }}</td>
+                            <td class="text-end text-muted">{{ stats.packets_recv }}</td>
+                            <td class="text-end text-muted px-4">{{ stats.packets_sent }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <!-- ============================================================ -->
@@ -315,6 +365,25 @@
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- BÖLÜM 7: ONLINE/OFFLINE ZEman ÇİZELGESİ -->
+<!-- ============================================================ -->
+<div id="timeline" class="dm-section">
+    <h5 class="dm-section-title"><i class="bi bi-calendar3 me-2"></i>Son 7 Gün — Online/Offline Zaman Çizelgesi</h5>
+    <div class="card dm-card">
+        <div class="card-body">
+            <div id="timelineContainer">
+                <div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm me-2"></div>Yükleniyor...</div>
+            </div>
+            <div class="d-flex gap-3 mt-2" style="font-size:.75rem">
+                <span><span style="display:inline-block;width:12px;height:12px;background:#22c55e;border-radius:2px;vertical-align:middle"></span> Online</span>
+                <span><span style="display:inline-block;width:12px;height:12px;background:#ef4444;border-radius:2px;vertical-align:middle"></span> Offline</span>
+                <span><span style="display:inline-block;width:12px;height:12px;background:var(--dm-surface-2,#e5e7eb);border-radius:2px;vertical-align:middle"></span> Bilinmiyor</span>
             </div>
         </div>
     </div>
@@ -483,6 +552,69 @@ function refresh(){
     }).catch(e=>{ showRefreshing(false); console.error(e); });
 }
 fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/stats/`).then(r=>r.json()).then(d=>{init(d.heartbeats||[]);setInterval(refresh,15000);});
+
+// ========== ONLINE/OFFLINE ZEman ÇİZELGESİ ==========
+(function(){
+const DAYS=7, DAY_MS=86400000;
+const TR_DAYS=['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'];
+const TR_MONTHS=['Oca','Şub','Mar','Nis','May','Haz','Tem','Ağu','Eyl','Eki','Kas','Ara'];
+
+function fmtDay(d){return `${d.getDate().toString().padStart(2,'0')} ${TR_MONTHS[d.getMonth()]} ${TR_DAYS[(d.getDay()+6)%7]}`;}
+
+fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/status-log/`)
+.then(r=>r.json())
+.then(data=>{
+    const logs=data.logs||[], isActive=data.is_currently_active;
+    const now=Date.now(), startMs=now-DAYS*DAY_MS;
+    const container=document.getElementById('timelineContainer');
+
+    // Tüm periyottaki segmentleri hesapla
+    const allSegs=[];
+    let state,segStart;
+    if(!logs.length){
+        allSegs.push({start:startMs,end:now,online:isActive});
+    } else {
+        state=!logs[0].went_online; segStart=startMs;
+        logs.forEach(l=>{
+            const t=new Date(l.timestamp).getTime();
+            if(t>segStart) allSegs.push({start:segStart,end:t,online:state});
+            segStart=t; state=l.went_online;
+        });
+        allSegs.push({start:segStart,end:now,online:state});
+    }
+
+    // 7 günlük satır oluştur
+    let html='<div style="font-family:var(--dm-font,inherit)">';
+    for(let d=0;d<DAYS;d++){
+        const dayStart=now-(DAYS-d)*DAY_MS, dayEnd=dayStart+DAY_MS;
+        const label=fmtDay(new Date(dayStart));
+        let barSegs='';
+        allSegs.forEach(s=>{
+            const s0=Math.max(s.start,dayStart), s1=Math.min(s.end,dayEnd);
+            if(s1>s0){
+                const left=((s0-dayStart)/DAY_MS*100).toFixed(2);
+                const w=((s1-s0)/DAY_MS*100).toFixed(2);
+                const color=s.online?'#22c55e':'#ef4444';
+                const hh=new Date(s0),hh2=new Date(s1);
+                const tip=`${hh.getHours().toString().padStart(2,'0')}:${hh.getMinutes().toString().padStart(2,'0')}–${hh2.getHours().toString().padStart(2,'0')}:${hh2.getMinutes().toString().padStart(2,'0')} ${s.online?'Online':'Offline'}`;
+                barSegs+=`<div title="${tip}" style="position:absolute;left:${left}%;width:${w}%;height:100%;background:${color};opacity:.85"></div>`;
+            }
+        });
+        html+=`<div class="d-flex align-items-center gap-2 mb-1">
+            <div style="font-size:.7rem;min-width:76px;text-align:right;color:var(--dm-text-muted);font-weight:600;flex-shrink:0">${label}</div>
+            <div style="flex:1;height:20px;border-radius:4px;overflow:hidden;background:var(--dm-surface-2,#e5e7eb);position:relative">${barSegs||''}</div>
+        </div>`;
+    }
+    // Saat etiketleri
+    html+='<div class="d-flex" style="margin-left:84px;font-size:.65rem;color:var(--dm-text-muted)">';
+    ['00:00','06:00','12:00','18:00','24:00'].forEach((t,i)=>{
+        html+=`<span style="flex:1;${i===0?'text-align:left':i===4?'text-align:right':'text-align:center'}">${t}</span>`;
+    });
+    html+='</div></div>';
+    container.innerHTML=html;
+})
+.catch(()=>{document.getElementById('timelineContainer').innerHTML='<p class="text-muted text-center py-3 mb-0"><i class="bi bi-exclamation-circle me-1"></i>Zaman çizelgesi verisi alınamadı.</p>';});
+})();
 
 // ========== 24 SAATLİK TREND ==========
 fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/hourly/`).then(r=>r.json()).then(data=>{

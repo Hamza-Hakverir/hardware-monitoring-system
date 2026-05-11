@@ -1,14 +1,23 @@
+import secrets
+
 from django.db import models
 from django.utils import timezone
 
 
+def _generate_device_token():
+    return secrets.token_hex(32)
+
+
 class Device(models.Model):
-    mac_address   = models.CharField(max_length=17, primary_key=True, unique=True)
-    os_info       = models.CharField(max_length=255)
-    is_active     = models.BooleanField(default=True)
-    last_seen     = models.DateTimeField(auto_now=True)
-    created_at    = models.DateTimeField(auto_now_add=True)
+    mac_address    = models.CharField(max_length=17, primary_key=True, unique=True)
+    os_info        = models.CharField(max_length=255)
+    is_active      = models.BooleanField(default=True)
+    last_seen      = models.DateTimeField(auto_now=True)
+    created_at     = models.DateTimeField(auto_now_add=True)
     went_online_at = models.DateTimeField(null=True, blank=True)
+    token           = models.CharField(max_length=64, unique=True, default=_generate_device_token)
+    tags            = models.ManyToManyField('Tag', blank=True, related_name='devices')
+    heartbeat_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         indexes = [
@@ -108,10 +117,11 @@ class HeartbeatLog(models.Model):
     # ============================================================
     # AĞ DETAY — Etkinlik Monitörü Ağ sekmesi
     # ============================================================
-    net_bytes_sent = models.BigIntegerField(default=0)    # Gönderilen veri (byte)
-    net_bytes_recv = models.BigIntegerField(default=0)    # Alınan veri (byte)
-    net_packets_sent = models.BigIntegerField(default=0)  # Gönderilen paket
-    net_packets_recv = models.BigIntegerField(default=0)  # Alınan paket
+    net_bytes_sent   = models.BigIntegerField(default=0)     # Gönderilen veri (byte)
+    net_bytes_recv   = models.BigIntegerField(default=0)     # Alınan veri (byte)
+    net_packets_sent = models.BigIntegerField(default=0)     # Gönderilen paket
+    net_packets_recv = models.BigIntegerField(default=0)     # Alınan paket
+    net_per_nic      = models.JSONField(default=dict, blank=True)  # Arayüz bazında istatistikler
 
     # ============================================================
     # TOP İŞLEMLER — En çok CPU/RAM kullanan 10 uygulama
@@ -155,6 +165,45 @@ class HourlyAggregate(models.Model):
         return f"{self.device_id} @ {self.hour:%Y-%m-%d %H:00} — CPU avg:{self.cpu_avg:.1f}%"
 
 
+class Tag(models.Model):
+    """Cihazlara atanabilen etiket (Sunucu, Masaüstü, Laptop…)"""
+    name  = models.CharField(max_length=50, unique=True)
+    color = models.CharField(max_length=7, default='#6c757d')
+
+    def __str__(self):
+        return self.name
+
+
+class DeviceThreshold(models.Model):
+    """Cihaza özel alert eşikleri. Yoksa global settings değerleri kullanılır."""
+    device        = models.OneToOneField(Device, on_delete=models.CASCADE, related_name='threshold')
+    cpu_warning   = models.FloatField(default=75.0)
+    cpu_critical  = models.FloatField(default=90.0)
+    ram_warning   = models.FloatField(default=75.0)
+    ram_critical  = models.FloatField(default=90.0)
+    disk_warning  = models.FloatField(default=75.0)
+    disk_critical = models.FloatField(default=90.0)
+
+    def __str__(self):
+        return f"{self.device_id} eşikleri"
+
+
+class DeviceStatusLog(models.Model):
+    """Cihazın online/offline geçiş kayıtları (zaman çizelgesi için)."""
+    device      = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='status_logs')
+    went_online = models.BooleanField()  # True=online oldu, False=offline oldu
+    timestamp   = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-timestamp']
+        indexes = [
+            models.Index(fields=['device', '-timestamp'], name='statuslog_device_ts_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.device_id} → {'online' if self.went_online else 'offline'} @ {self.timestamp}"
+
+
 class Alert(models.Model):
     SEVERITY_WARNING  = 'WARNING'
     SEVERITY_CRITICAL = 'CRITICAL'
@@ -164,8 +213,11 @@ class Alert(models.Model):
     alert_type = models.CharField(max_length=50)
     severity   = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default=SEVERITY_CRITICAL)
     message = models.TextField()
-    is_resolved = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+    is_resolved     = models.BooleanField(default=False)
+    notified        = models.BooleanField(default=False)
+    resolution_note = models.TextField(blank=True, default='')
+    resolved_at     = models.DateTimeField(null=True, blank=True)
+    created_at      = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         indexes = [

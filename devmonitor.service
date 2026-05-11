@@ -1,0 +1,40 @@
+[Unit]
+Description=DevMonitor Donanım İzleme Ajanı
+Documentation=https://github.com/YunusEdizer/hardware-monitoring-system
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ---- Aşağıdaki iki satırı ortamınıza göre düzenleyin ----
+User=devmonitor
+WorkingDirectory=/opt/devmonitor
+
+# Python sanal ortam kullanıyorsanız:
+#   ExecStart=/opt/devmonitor/.venv/bin/python agent.py
+# Sistem Python kullanıyorsanız:
+ExecStart=/usr/bin/python3 /opt/devmonitor/agent.py
+# ---------------------------------------------------------
+
+# Sunucu adresi veya heartbeat aralığını değiştirmek için:
+# ExecStart=/usr/bin/python3 /opt/devmonitor/agent.py --server http://192.168.1.10:8000/api/monitoring --interval 30
+
+# Beklenmedik çıkışlarda otomatik yeniden başlat (5sn bekle)
+Restart=on-failure
+RestartSec=5s
+
+# Servis başlamadan önce ağın hazır olmasını bekle (ek güvence)
+ExecStartPre=/bin/sleep 3
+
+# Stdout/Stderr journald'a yaz → journalctl -u devmonitor -f ile izle
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=devmonitor
+
+# Kaynak sınırları (isteğe bağlı)
+# MemoryMax=128M
+# CPUQuota=10%
+
+[Install]
+WantedBy=multi-user.target

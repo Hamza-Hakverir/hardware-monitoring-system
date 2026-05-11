@@ -6,10 +6,13 @@
 <div class="dm-page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
         <h2 class="mb-1"><i class="bi bi-exclamation-triangle me-2"></i>Uyarı Listesi</h2>
-        <p class="text-muted mb-0">Toplam {{ alerts|length }} uyarı kaydı</p>
+        <p class="text-muted mb-0">Toplam {{ total_alert_count }} uyarı kaydı</p>
     </div>
     <div class="d-flex gap-2">
         <input type="text" id="alertSearch" class="form-control dm-search" placeholder="Uyarı ara...">
+        <a href="{% url 'ui_alerts_csv' %}" class="btn btn-outline-secondary">
+            <i class="bi bi-download me-1"></i>CSV
+        </a>
         <a href="{% url 'ui_add_alert' %}" class="btn btn-dm-primary">
             <i class="bi bi-plus-circle me-1"></i>Yeni
         </a>
@@ -56,17 +59,34 @@
                                 <span class="dm-badge bg-warning text-dark"><i class="bi bi-exclamation-triangle-fill me-1"></i>Uyarı</span>
                             {% endif %}
                         </td>
-                        <td>{{ alert.message }}</td>
+                        <td>
+                            {{ alert.message }}
+                            {% if alert.resolution_note %}
+                            <div class="mt-1" style="font-size:.75rem;color:var(--dm-text-muted)">
+                                <i class="bi bi-chat-left-text me-1"></i><em>{{ alert.resolution_note }}</em>
+                            </div>
+                            {% endif %}
+                        </td>
                         <td id="status-{{ alert.id }}">
                             {% if alert.is_resolved %}
                                 <span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>
+                                {% if alert.resolved_at %}<div style="font-size:.7rem;color:var(--dm-text-muted);margin-top:2px">{{ alert.resolved_at|date:"d M H:i" }}</div>{% endif %}
                             {% else %}
                                 <span class="dm-badge bg-danger"><i class="bi bi-clock me-1"></i>Beklemede</span>
+                            {% endif %}
+                            {% if alert.severity == 'CRITICAL' %}
+                                {% if alert.notified %}
+                                    <span class="dm-badge bg-secondary ms-1" title="E-posta gönderildi"><i class="bi bi-envelope-check me-1"></i>Mail</span>
+                                {% else %}
+                                    <span class="dm-badge bg-outline-secondary ms-1" style="border:1px solid var(--dm-border);color:var(--dm-text-muted);" title="E-posta gönderilmedi"><i class="bi bi-envelope me-1"></i>Mail</span>
+                                {% endif %}
                             {% endif %}
                         </td>
                         <td class="text-end px-4" id="action-{{ alert.id }}">
                             {% if not alert.is_resolved %}
-                                <button onclick="resolveAlert({{ alert.id }})" class="btn btn-sm btn-outline-success">
+                                <button class="btn btn-sm btn-outline-success"
+                                        data-bs-toggle="modal" data-bs-target="#resolveModal"
+                                        data-alert-id="{{ alert.id }}">
                                     <i class="bi bi-check2 me-1"></i>Çözüldü
                                 </button>
                             {% else %}
@@ -86,6 +106,30 @@
                     {% endfor %}
                 </tbody>
             </table>
+        </div>
+    </div>
+</div>
+
+<!-- Çözüm Notu Modalı -->
+<div class="modal fade" id="resolveModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="background:var(--dm-card-bg);border:1px solid var(--dm-border)">
+            <div class="modal-header" style="border-color:var(--dm-border)">
+                <h6 class="modal-title fw-semibold"><i class="bi bi-check2-circle me-2 text-success"></i>Uyarıyı Çöz</h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3" style="font-size:.85rem">İsteğe bağlı olarak bir çözüm açıklaması yazabilirsiniz.</p>
+                <textarea id="resolveNote" class="form-control" rows="3"
+                          placeholder="Örn: Gereksiz servis durduruldu, bellek temizlendi..."
+                          style="background:var(--dm-surface);border-color:var(--dm-border);color:var(--dm-text);resize:vertical"></textarea>
+            </div>
+            <div class="modal-footer" style="border-color:var(--dm-border)">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">İptal</button>
+                <button type="button" class="btn btn-success btn-sm" id="resolveConfirmBtn">
+                    <i class="bi bi-check2 me-1"></i>Onayla
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -121,28 +165,55 @@ document.getElementById('alertSearch').addEventListener('input', function() {
     });
 });
 
-// AJAX ile uyarıyı çözüldü olarak işaretleme (sayfa yenilemeden)
-function resolveAlert(alertId) {
-    fetch(`/api/monitoring/alerts/${alertId}/resolve/`, {
+// Modal — alert ID'yi butona tıklandığında yakala
+let pendingAlertId = null;
+document.getElementById('resolveModal').addEventListener('show.bs.modal', function(e) {
+    pendingAlertId = e.relatedTarget.dataset.alertId;
+    document.getElementById('resolveNote').value = '';
+});
+
+document.getElementById('resolveConfirmBtn').addEventListener('click', function() {
+    if (!pendingAlertId) return;
+    const note = document.getElementById('resolveNote').value.trim();
+    const btn  = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Kaydediliyor...';
+
+    fetch(`/api/monitoring/alerts/${pendingAlertId}/resolve/`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
             'X-CSRFToken': '{{ csrf_token }}'
-        }
+        },
+        body: JSON.stringify({ resolution_note: note })
     })
     .then(response => {
         if (response.ok) {
-            document.getElementById('status-' + alertId).innerHTML =
-                '<span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>';
-            document.getElementById('action-' + alertId).innerHTML =
-                '<span class="text-muted">—</span>';
-            document.getElementById('alert-' + alertId).style.opacity = '0.6';
-            showToast('Uyarı çözüldü olarak işaretlendi.', 'success');
+            return response.json().then(data => {
+                bootstrap.Modal.getInstance(document.getElementById('resolveModal')).hide();
+                const now = new Date().toLocaleString('tr-TR', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+                let statusHtml = '<span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>'
+                              + `<div style="font-size:.7rem;color:var(--dm-text-muted);margin-top:2px">${now}</div>`;
+                document.getElementById('status-' + pendingAlertId).innerHTML = statusHtml;
+                document.getElementById('action-' + pendingAlertId).innerHTML = '<span class="text-muted">—</span>';
+                const row = document.getElementById('alert-' + pendingAlertId);
+                if (row) row.style.opacity = '0.6';
+                // Not varsa mesaj hücresine ekle
+                if (note) {
+                    const msgCell = row ? row.querySelector('td:nth-child(5)') : null;
+                    if (msgCell) {
+                        msgCell.insertAdjacentHTML('beforeend',
+                            `<div class="mt-1" style="font-size:.75rem;color:var(--dm-text-muted)"><i class="bi bi-chat-left-text me-1"></i><em>${note}</em></div>`);
+                    }
+                }
+                showToast('Uyarı çözüldü olarak işaretlendi.', 'success');
+            });
         } else {
             showToast('İşlem başarısız, tekrar deneyin.', 'danger');
         }
     })
-    .catch(err => { showToast('Sunucuya bağlanılamadı.', 'danger'); console.error('Hata:', err); });
-}
+    .catch(err => { showToast('Sunucuya bağlanılamadı.', 'danger'); console.error(err); })
+    .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2 me-1"></i>Onayla'; });
+});
 </script>
 {% endblock %}

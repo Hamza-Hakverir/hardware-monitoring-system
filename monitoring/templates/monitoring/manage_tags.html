@@ -1,0 +1,147 @@
+{% extends 'monitoring/base.html' %}
+
+{% block title %}Etiket Yönetimi — {{ device.mac_address }}{% endblock %}
+
+{% block content %}
+<div class="dm-page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+        <h2 class="mb-1"><i class="bi bi-tags me-2"></i>Etiket Yönetimi</h2>
+        <p class="text-muted mb-0">
+            <a href="{% url 'ui_device_detail' pk=device.mac_address %}" class="text-decoration-none">
+                <i class="bi bi-arrow-left me-1"></i>{{ device.mac_address }}
+            </a>
+        </p>
+    </div>
+</div>
+
+{% if errors %}
+<div class="alert alert-danger dm-animate">
+    <i class="bi bi-exclamation-triangle me-2"></i>
+    {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+{% if success %}
+<div class="alert alert-success dm-animate">
+    <i class="bi bi-check-circle me-2"></i>{{ success }}
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <!-- Mevcut etiketleri ata -->
+    <div class="col-md-6">
+        <div class="card dm-card dm-animate h-100">
+            <div class="card-header py-3">
+                <h6 class="mb-0 fw-semibold"><i class="bi bi-check2-square me-2"></i>Etiketi Ata / Kaldır</h6>
+            </div>
+            <div class="card-body">
+                {% if all_tags %}
+                <form method="post">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="assign">
+                    <div class="d-flex flex-column gap-2 mb-4">
+                        {% for tag in all_tags %}
+                        <label class="d-flex align-items-center gap-2 p-2 rounded" style="cursor:pointer;border:1px solid var(--dm-border);">
+                            <input type="checkbox" name="tag_ids" value="{{ tag.id }}"
+                                   {% if tag.id in device_tag_ids %}checked{% endif %}
+                                   class="form-check-input mt-0" style="flex-shrink:0;">
+                            <span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:{{ tag.color }};flex-shrink:0;"></span>
+                            <span class="fw-medium">{{ tag.name }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="btn btn-dm-primary w-100">
+                        <i class="bi bi-save me-1"></i>Değişiklikleri Kaydet
+                    </button>
+                </form>
+                {% else %}
+                <div class="text-center py-4 text-muted">
+                    <i class="bi bi-tags" style="font-size:2rem;"></i>
+                    <p class="mt-2 mb-0">Henüz etiket oluşturulmadı.<br>Sağdaki formu kullanarak yeni etiket ekleyin.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Yeni etiket oluştur -->
+    <div class="col-md-6">
+        <div class="card dm-card dm-animate h-100">
+            <div class="card-header py-3">
+                <h6 class="mb-0 fw-semibold"><i class="bi bi-plus-circle me-2"></i>Yeni Etiket Oluştur</h6>
+            </div>
+            <div class="card-body">
+                <form method="post" id="createTagForm">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="create">
+                    <input type="hidden" name="tag_color" id="selectedColor" value="#6c757d">
+
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Etiket Adı</label>
+                        <input type="text" name="tag_name" class="form-control" placeholder="Örn: Sunucu, Lab-A, Kritik" maxlength="50" required>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="form-label fw-medium">Renk</label>
+                        <div class="d-flex flex-wrap gap-2 mb-2" id="presetColors">
+                            {% for hex, label in preset_colors %}
+                            <button type="button"
+                                    class="color-btn"
+                                    data-color="{{ hex }}"
+                                    title="{{ label }}"
+                                    style="width:32px;height:32px;border-radius:6px;background:{{ hex }};border:2px solid transparent;cursor:pointer;transition:border-color .15s;">
+                            </button>
+                            {% endfor %}
+                        </div>
+                        <div class="d-flex align-items-center gap-2 mt-2">
+                            <label class="form-label mb-0 text-muted" style="font-size:.85rem;">Özel:</label>
+                            <input type="color" id="customColorPicker" value="#6c757d"
+                                   class="form-control form-control-color" style="width:48px;height:32px;padding:2px;">
+                        </div>
+                        <div class="mt-2 d-flex align-items-center gap-2">
+                            <span style="font-size:.85rem;color:var(--dm-text-muted);">Seçili:</span>
+                            <span id="colorPreview" style="display:inline-block;width:20px;height:20px;border-radius:4px;background:#6c757d;"></span>
+                            <code id="colorCode" style="font-size:.8rem;">#6c757d</code>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-dm-primary w-100">
+                        <i class="bi bi-plus-circle me-1"></i>Etiket Oluştur ve Ata
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    const hiddenInput = document.getElementById('selectedColor');
+    const preview = document.getElementById('colorPreview');
+    const codeEl = document.getElementById('colorCode');
+    const picker = document.getElementById('customColorPicker');
+
+    function applyColor(hex) {
+        hiddenInput.value = hex;
+        preview.style.background = hex;
+        codeEl.textContent = hex;
+        picker.value = hex;
+        document.querySelectorAll('.color-btn').forEach(btn => {
+            btn.style.borderColor = btn.dataset.color === hex ? '#fff' : 'transparent';
+            btn.style.outline = btn.dataset.color === hex ? '2px solid ' + hex : 'none';
+        });
+    }
+
+    document.querySelectorAll('.color-btn').forEach(btn => {
+        btn.addEventListener('click', () => applyColor(btn.dataset.color));
+    });
+
+    picker.addEventListener('input', () => applyColor(picker.value));
+
+    // Select first preset by default
+    const first = document.querySelector('.color-btn');
+    if (first) applyColor(first.dataset.color);
+})();
+</script>
+{% endblock %}
