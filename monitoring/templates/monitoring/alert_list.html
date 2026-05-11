@@ -25,6 +25,7 @@
                         <th class="px-4 py-3">Tarih</th>
                         <th class="py-3">Cihaz</th>
                         <th class="py-3">Tür</th>
+                        <th class="py-3">Şiddet</th>
                         <th class="py-3">Mesaj</th>
                         <th class="py-3">Durum</th>
                         <th class="py-3 text-end px-4">İşlem</th>
@@ -47,6 +48,13 @@
                                 {% endif %}
                                 {{ alert.alert_type }}
                             </span>
+                        </td>
+                        <td>
+                            {% if alert.severity == 'CRITICAL' %}
+                                <span class="dm-badge bg-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i>Kritik</span>
+                            {% else %}
+                                <span class="dm-badge bg-warning text-dark"><i class="bi bi-exclamation-triangle-fill me-1"></i>Uyarı</span>
+                            {% endif %}
                         </td>
                         <td>{{ alert.message }}</td>
                         <td id="status-{{ alert.id }}">
@@ -81,6 +89,26 @@
         </div>
     </div>
 </div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="mt-3 d-flex justify-content-center">
+    <ul class="pagination">
+        {% if page_obj.has_previous %}
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}"><i class="bi bi-chevron-left"></i></a></li>
+        {% endif %}
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}
+            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+            {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+            <li class="page-item"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>
+            {% endif %}
+        {% endfor %}
+        {% if page_obj.has_next %}
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}"><i class="bi bi-chevron-right"></i></a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}
@@ -104,17 +132,17 @@ function resolveAlert(alertId) {
     })
     .then(response => {
         if (response.ok) {
-            // Durumu güncelle
             document.getElementById('status-' + alertId).innerHTML =
                 '<span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>';
-            // Butonu kaldır
             document.getElementById('action-' + alertId).innerHTML =
                 '<span class="text-muted">—</span>';
-            // Satırı hafifçe soluklaştır
             document.getElementById('alert-' + alertId).style.opacity = '0.6';
+            showToast('Uyarı çözüldü olarak işaretlendi.', 'success');
+        } else {
+            showToast('İşlem başarısız, tekrar deneyin.', 'danger');
         }
     })
-    .catch(err => console.error('Hata:', err));
+    .catch(err => { showToast('Sunucuya bağlanılamadı.', 'danger'); console.error('Hata:', err); });
 }
 </script>
 {% endblock %}

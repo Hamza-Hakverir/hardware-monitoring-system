@@ -11,6 +11,7 @@ urlpatterns = [
     path('devices/register/', views.register_device, name='register_device'),
     path('devices/<str:pk>/', views.device_detail, name='device_detail'),
     path('devices/<str:pk>/stats/', views.device_stats, name='device_stats'),  # YENİ: Chart.js verisi
+    path('devices/<str:pk>/hourly/', views.device_hourly_trend, name='device_hourly_trend'),  # YENİ: Saatlik trend
 
     # Heartbeats
     path('heartbeats/', views.receive_heartbeat, name='receive_heartbeat'),

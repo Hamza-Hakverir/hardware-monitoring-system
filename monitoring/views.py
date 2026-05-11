@@ -1,10 +1,16 @@
 from datetime import timedelta
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
+from django.db.models import Prefetch, Avg, Max
+from django.conf import settings
+from django.core.paginator import Paginator
+import logging
+
+logger = logging.getLogger('monitoring')
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .models import Device, Location, HardwareSpec, HeartbeatLog, Alert
+from .models import Device, Location, HardwareSpec, HeartbeatLog, Alert, HourlyAggregate
 from .serializers import (
     DeviceSerializer, LocationSerializer, HardwareSpecSerializer,
     HeartbeatLogSerializer, AlertSerializer,
@@ -25,6 +31,46 @@ def mark_stale_devices_inactive():
     """
     cutoff = timezone.now() - timedelta(minutes=STALE_THRESHOLD_MINUTES)
     Device.objects.filter(is_active=True, last_seen__lt=cutoff).update(is_active=False)
+
+
+def aggregate_completed_hours(device):
+    """Son 25 saatin tamamlanmış saatlerini HourlyAggregate'e yazar (upsert).
+    Temizlik sırasında çağrılır — tamamlanmamış mevcut saat dahil edilmez.
+    """
+    from django.db.models import Count
+    from django.db.models.functions import TruncHour
+
+    now = timezone.now()
+    current_hour = now.replace(minute=0, second=0, microsecond=0)
+    since = current_hour - timedelta(hours=25)
+
+    rows = (
+        device.heartbeats
+        .filter(timestamp__gte=since, timestamp__lt=current_hour)
+        .annotate(hour=TruncHour('timestamp'))
+        .values('hour')
+        .annotate(
+            cpu_avg=Avg('cpu_percent'),
+            cpu_max=Max('cpu_percent'),
+            ram_avg=Avg('ram_percent'),
+            ram_max=Max('ram_percent'),
+            disk_avg=Avg('disk_percent'),
+            cnt=Count('id'),
+        )
+    )
+    for row in rows:
+        HourlyAggregate.objects.update_or_create(
+            device=device,
+            hour=row['hour'],
+            defaults={
+                'cpu_avg': round(row['cpu_avg'] or 0, 1),
+                'cpu_max': round(row['cpu_max'] or 0, 1),
+                'ram_avg': round(row['ram_avg'] or 0, 1),
+                'ram_max': round(row['ram_max'] or 0, 1),
+                'disk_avg': round(row['disk_avg'] or 0, 1),
+                'sample_count': row['cnt'],
+            }
+        )
 
 
 # ============================================================
@@ -50,35 +96,72 @@ def receive_heartbeat(request):
     if serializer.is_valid():
         heartbeat = serializer.save()
 
-        # Cihazı aktif olarak işaretle ve last_seen güncelle
+        # Cihazı aktif olarak işaretle ve last_seen güncelle.
+        # Pasif → aktif geçişinde went_online_at kaydet (uptime başlangıcı).
         device = heartbeat.device
+        update_fields = ['is_active', 'last_seen']
+        if not device.is_active:
+            device.went_online_at = timezone.now()
+            update_fields.append('went_online_at')
         device.is_active = True
-        device.save(update_fields=['is_active', 'last_seen'])
+        device.save(update_fields=update_fields)
 
-        # Eşik kontrolü: CPU, RAM veya Disk %90'ı geçerse otomatik alert oluştur
-        threshold = 90.0
-        if heartbeat.cpu_percent >= threshold:
-            Alert.objects.create(
-                device=device,
-                alert_type='CPU_HIGH',
-                message=f'CPU kullanımı kritik seviyede: %{heartbeat.cpu_percent:.1f}'
-            )
-        if heartbeat.ram_percent >= threshold:
-            Alert.objects.create(
-                device=device,
-                alert_type='RAM_HIGH',
-                message=f'RAM kullanımı kritik seviyede: %{heartbeat.ram_percent:.1f}'
-            )
-        if heartbeat.disk_percent >= threshold:
-            Alert.objects.create(
-                device=device,
-                alert_type='DISK_FULL',
-                message=f'Disk kullanımı kritik seviyede: %{heartbeat.disk_percent:.1f}'
-            )
+        # Eşik kontrolü: WARNING (%75) ve CRITICAL (%90) iki seviyeli alert.
+        # Aynı cihaz + aynı tür için zaten çözülmemiş alert varsa yeni yaratma.
+        warn_thr = settings.ALERT_WARNING_THRESHOLD
+        crit_thr = settings.ALERT_CRITICAL_THRESHOLD
+        metric_checks = [
+            (heartbeat.cpu_percent,  'CPU_HIGH',  'CPU'),
+            (heartbeat.ram_percent,  'RAM_HIGH',  'RAM'),
+            (heartbeat.disk_percent, 'DISK_FULL', 'Disk'),
+        ]
+        # Mevcut aktif alert'lerin (type, severity) çiftlerini al
+        active_alerts = set(
+            Alert.objects.filter(device=device, is_resolved=False)
+                         .values_list('alert_type', 'severity')
+        )
+        for value, alert_type, label in metric_checks:
+            if value >= crit_thr and (alert_type, Alert.SEVERITY_CRITICAL) not in active_alerts:
+                msg = f'{label} kullanımı KRİTİK seviyede: %{value:.1f}'
+                Alert.objects.create(device=device, alert_type=alert_type,
+                                     severity=Alert.SEVERITY_CRITICAL, message=msg)
+                logger.warning('CRITICAL alert: %s device=%s value=%.1f', alert_type, device.pk, value)
+            elif warn_thr <= value < crit_thr and (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
+                msg = f'{label} kullanımı UYARI seviyesinde: %{value:.1f}'
+                Alert.objects.create(device=device, alert_type=alert_type,
+                                     severity=Alert.SEVERITY_WARNING, message=msg)
+                logger.info('WARNING alert: %s device=%s value=%.1f', alert_type, device.pk, value)
+
+        # Anomali tespiti: son 20 heartbeat ortalamasının 2×'ından yüksekse alert
+        ANOMALY_WINDOW = 20
+        ANOMALY_MULTIPLIER = 2.0
+        recent_hbs = list(device.heartbeats.exclude(pk=heartbeat.pk).values_list(
+            'cpu_percent', 'ram_percent'
+        )[:ANOMALY_WINDOW])
+        if len(recent_hbs) >= 5:
+            cpu_vals  = [r[0] for r in recent_hbs]
+            ram_vals  = [r[1] for r in recent_hbs]
+            cpu_base  = sum(cpu_vals) / len(cpu_vals)
+            ram_base  = sum(ram_vals) / len(ram_vals)
+            anomaly_checks = [
+                (heartbeat.cpu_percent, cpu_base, 'CPU_ANOMALY', 'CPU'),
+                (heartbeat.ram_percent, ram_base, 'RAM_ANOMALY', 'RAM'),
+            ]
+            for value, baseline, alert_type, label in anomaly_checks:
+                # Yalnızca baseline anlamlıysa (>5%) ve değer 2× üstündeyse
+                if baseline > 5 and value >= baseline * ANOMALY_MULTIPLIER:
+                    if (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
+                        msg = (f'{label} ani artış: %{value:.1f} '
+                               f'(son {len(recent_hbs)} ölçüm ort. %{baseline:.1f})')
+                        Alert.objects.create(device=device, alert_type=alert_type,
+                                             severity=Alert.SEVERITY_WARNING, message=msg)
+                        logger.info('ANOMALY alert: %s device=%s value=%.1f base=%.1f',
+                                    alert_type, device.pk, value, baseline)
 
         # Otomatik temizleme: her CLEANUP_EVERY kayıtta bir eski heartbeat'leri sil
         total = device.heartbeats.count()
         if total > HEARTBEAT_LIMIT + CLEANUP_EVERY:
+            aggregate_completed_hours(device)
             # N. kaydın timestamp'ini bul, ondan eskilerini sil (ID listesi yüklemekten çok daha verimli)
             cutoff_ts = device.heartbeats.values_list('timestamp', flat=True)[HEARTBEAT_LIMIT:HEARTBEAT_LIMIT + 1]
             if cutoff_ts:
@@ -205,6 +288,7 @@ def dashboard_stats(request):
     - Toplam / Çözülmemiş uyarı sayısı
     - Son 5 uyarı
     """
+    mark_stale_devices_inactive()
     total = Device.objects.count()
     active = Device.objects.filter(is_active=True).count()
     unresolved = Alert.objects.filter(is_resolved=False).count()
@@ -219,6 +303,33 @@ def dashboard_stats(request):
         'recent_alerts': AlertSerializer(recent, many=True).data,
     }
     return Response(data)
+
+
+# 13. Saatlik trend verisi (GET) — son 24 saat
+@api_view(['GET'])
+def device_hourly_trend(request, pk):
+    """Bir cihazın son 24 saatlik ortalama metriklerini döndürür.
+    Chart.js bar chart bu veriyi kullanarak geçmiş trend grafiği çizer.
+    """
+    try:
+        device = Device.objects.get(pk=pk)
+    except Device.DoesNotExist:
+        return Response({'error': 'Cihaz bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
+
+    since = timezone.now() - timedelta(hours=24)
+    rows = list(reversed(list(
+        device.hourly_stats.filter(hour__gte=since).order_by('-hour')[:24]
+    )))
+    data = [{
+        'hour': r.hour.strftime('%H:00'),
+        'cpu_avg': r.cpu_avg,
+        'cpu_max': r.cpu_max,
+        'ram_avg': r.ram_avg,
+        'ram_max': r.ram_max,
+        'disk_avg': r.disk_avg,
+        'sample_count': r.sample_count,
+    } for r in rows]
+    return Response({'device': pk, 'hours': data})
 
 
 # ============================================================
@@ -249,8 +360,13 @@ def dashboard_view(request):
 def device_list_view(request):
     """Cihaz listesi sayfası — tüm cihazlar tablo halinde."""
     mark_stale_devices_inactive()  # 2 dk sinyal gelmeyenleri pasif yap
-    devices = Device.objects.select_related('location', 'hardware').all()
-    return render(request, 'monitoring/device_list.html', {'devices': devices})
+    latest_hb_qs = HeartbeatLog.objects.order_by('-timestamp')
+    qs = Device.objects.select_related('location', 'hardware').prefetch_related(
+        Prefetch('heartbeats', queryset=latest_hb_qs, to_attr='prefetched_heartbeats')
+    ).all()
+    paginator = Paginator(qs, 20)
+    page = paginator.get_page(request.GET.get('page'))
+    return render(request, 'monitoring/device_list.html', {'devices': page, 'page_obj': page})
 
 
 def device_detail_view(request, pk):
@@ -278,8 +394,10 @@ def device_detail_view(request, pk):
 
 def alert_list_view(request):
     """Uyarı listesi sayfası."""
-    alerts = Alert.objects.all().order_by('-created_at')
-    return render(request, 'monitoring/alert_list.html', {'alerts': alerts})
+    qs = Alert.objects.all().order_by('-created_at')
+    paginator = Paginator(qs, 25)
+    page = paginator.get_page(request.GET.get('page'))
+    return render(request, 'monitoring/alert_list.html', {'alerts': page, 'page_obj': page})
 
 
 def add_alert_view(request):

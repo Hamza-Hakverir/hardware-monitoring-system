@@ -96,6 +96,7 @@
                         <th class="px-4 py-3">Tarih</th>
                         <th class="py-3">Cihaz</th>
                         <th class="py-3">Tür</th>
+                        <th class="py-3">Şiddet</th>
                         <th class="py-3">Mesaj</th>
                         <th class="py-3 px-4">Durum</th>
                     </tr>
@@ -113,6 +114,13 @@
                             <span class="dm-badge bg-{% if alert.alert_type == 'CPU_HIGH' %}danger{% elif alert.alert_type == 'RAM_HIGH' %}warning text-dark{% elif alert.alert_type == 'DISK_FULL' %}info{% else %}secondary{% endif %}">
                                 {{ alert.alert_type }}
                             </span>
+                        </td>
+                        <td>
+                            {% if alert.severity == 'CRITICAL' %}
+                                <span class="dm-badge bg-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i>Kritik</span>
+                            {% else %}
+                                <span class="dm-badge bg-warning text-dark"><i class="bi bi-exclamation-triangle-fill me-1"></i>Uyarı</span>
+                            {% endif %}
                         </td>
                         <td>{{ alert.message|truncatechars:50 }}</td>
                         <td class="px-4">
@@ -146,6 +154,8 @@
 let statusChart, alertChart;
 const activeCount = {{ active_devices|default:0 }};
 const inactiveCount = {{ inactive_devices|default:0 }};
+// Cihaz detay URL şablonu — Django URL sistemine bağlı kalmak için
+const DEVICE_DETAIL_BASE = "{% url 'ui_device_detail' pk='__MAC__' %}".replace('__MAC__', '');
 
 function initCharts() {
     const statusCtx = document.getElementById('deviceStatusChart');
@@ -224,9 +234,11 @@ function getAlertBadgeClass(type) {
 }
 
 function refreshDashboard() {
+    showRefreshing(true);
     fetch('/api/monitoring/dashboard/stats/')
     .then(r => r.json())
     .then(data => {
+        showRefreshing(false);
         // 1. Kartları Güncelle
         document.getElementById('valTotal').textContent = data.total_devices;
         document.getElementById('valActive').textContent = data.active_devices;
@@ -267,17 +279,25 @@ function refreshDashboard() {
                     ? '<span class="dm-badge bg-success"><i class="bi bi-check-circle me-1"></i>Çözüldü</span>'
                     : '<span class="dm-badge bg-danger"><i class="bi bi-clock me-1"></i>Beklemede</span>';
                 
+                const severityHtml = a.severity === 'CRITICAL'
+                    ? '<span class="dm-badge bg-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i>Kritik</span>'
+                    : '<span class="dm-badge bg-warning text-dark"><i class="bi bi-exclamation-triangle-fill me-1"></i>Uyarı</span>';
                 html += `<tr>
                     <td class="px-4 text-muted">${formatDate(a.created_at)}</td>
-                    <td><a href="/api/monitoring/ui/devices/${a.device}/" class="text-decoration-none fw-medium">${macTrunc}</a></td>
+                    <td><a href="${DEVICE_DETAIL_BASE}${encodeURIComponent(a.device)}/" class="text-decoration-none fw-medium">${macTrunc}</a></td>
                     <td><span class="dm-badge bg-${getAlertBadgeClass(a.alert_type)}">${a.alert_type}</span></td>
+                    <td>${severityHtml}</td>
                     <td>${a.message.length > 50 ? a.message.substring(0, 50) + '...' : a.message}</td>
                     <td class="px-4">${statusHtml}</td>
                 </tr>`;
             });
             tbody.innerHTML = html;
         }
-    }).catch(e => console.error('Dashboard güncelleme hatası:', e));
+    }).catch(e => {
+        showRefreshing(false);
+        showToast('Sunucuya bağlanılamadı, yenileme başarısız.', 'danger');
+        console.error('Dashboard güncelleme hatası:', e);
+    });
 }
 
 // Başlat ve Zamanlayıcıyı Kur

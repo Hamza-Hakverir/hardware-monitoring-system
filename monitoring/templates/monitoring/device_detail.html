@@ -37,6 +37,9 @@
             <span class="dm-badge bg-danger px-3 py-2"><i class="bi bi-x-circle me-1"></i>Pasif</span>
         {% endif %}
         <small class="text-muted" id="lastUpdate">Son: {{ device.last_seen|date:"d M H:i:s" }}</small>
+        {% if device.uptime_display %}
+        <span class="dm-badge bg-success px-2 py-1" style="font-size:.7rem"><i class="bi bi-clock-history me-1"></i>{{ device.uptime_display }}</span>
+        {% endif %}
         <span class="dm-badge bg-dark px-2 py-1" style="font-size:.65rem"><span class="dm-live-dot me-1" style="width:5px;height:5px;vertical-align:middle"></span>15sn</span>
     </div>
 </div>
@@ -87,7 +90,7 @@
                 {% if latest_hb.battery_percent != None %}
                 <i class="bi bi-{% if latest_hb.battery_plugged %}plug{% else %}battery-half{% endif %}" style="font-size:1.5rem;color:var(--dm-success)"></i>
                 <h3 class="fw-bold mt-1 mb-0" style="color:var(--dm-success)">%{{ latest_hb.battery_percent|floatformat:0 }}</h3>
-                <p class="text-muted mb-1" style="font-size:.75rem">{% if latest_hb.battery_plugged %}🔌 Şarjda{% else %}🔋 Pilde{% endif %}</p>
+                <p class="text-muted mb-1" style="font-size:.75rem">{% if latest_hb.battery_plugged %}Şarjda{% else %}Pilde{% endif %}</p>
                 <div class="progress dm-progress"><div class="progress-bar bg-success" style="width:{{ latest_hb.battery_percent }}%"></div></div>
                 {% else %}
                 <i class="bi bi-diagram-3" style="font-size:1.5rem;color:#6f42c1"></i>
@@ -96,13 +99,15 @@
                 {% endif %}
             </div></div>
         </div>
+        {% if latest_hb.battery_percent != None %}
         <div class="col-6 col-md">
             <div class="card dm-card h-100"><div class="card-body text-center py-3">
                 <i class="bi bi-diagram-3" style="font-size:1.5rem;color:#6f42c1"></i>
-                <h3 class="fw-bold mt-1 mb-0" id="processValue2" style="color:#6f42c1">{{ latest_hb.process_count|default:"—" }}</h3>
+                <h3 class="fw-bold mt-1 mb-0" id="processValue" style="color:#6f42c1">{{ latest_hb.process_count|default:"—" }}</h3>
                 <p class="text-muted mb-1" style="font-size:.75rem">Süreç</p>
             </div></div>
         </div>
+        {% endif %}
     </div>
     <!-- Donanım + Konum Bilgisi -->
     <div class="row g-3">
@@ -136,6 +141,17 @@
 </div>
 
 <!-- ============================================================ -->
+<!-- BÖLÜM 1.5: 24 SAATLİK TREND -->
+<!-- ============================================================ -->
+<div class="card dm-card mb-4 dm-animate">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 fw-bold"><i class="bi bi-graph-up me-2"></i>24 Saatlik Geçmiş Trend</h6>
+        <small class="text-muted" id="trendStatus">Yükleniyor...</small>
+    </div>
+    <div class="card-body" style="padding:.75rem"><canvas id="trendChart" height="80"></canvas></div>
+</div>
+
+<!-- ============================================================ -->
 <!-- BÖLÜM 2: CPU DETAY -->
 <!-- ============================================================ -->
 <div id="cpu" class="dm-section">
@@ -147,9 +163,31 @@
         <div class="dm-info-item"><div class="label">Frekans</div><div class="value">{{ latest_hb.cpu_freq|floatformat:0|default:"0" }} MHz</div></div>
         <div class="dm-info-item"><div class="label">İş Parçacığı</div><div class="value" style="color:#6f42c1">{{ latest_hb.thread_count|default:"0" }}</div></div>
         <div class="dm-info-item"><div class="label">İşlem Sayısı</div><div class="value">{{ latest_hb.process_count|default:"0" }}</div></div>
+        {% if latest_hb.cpu_temperature %}
+        <div class="dm-info-item"><div class="label">Sıcaklık</div><div class="value" style="color:{% if latest_hb.cpu_temperature >= 80 %}var(--dm-danger){% elif latest_hb.cpu_temperature >= 60 %}var(--dm-warning){% else %}var(--dm-success){% endif %}">{{ latest_hb.cpu_temperature|floatformat:1 }}°C</div></div>
+        {% endif %}
     </div>
     <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-activity me-2"></i>CPU Yükü</h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="cpuChart" height="80"></canvas></div></div>
+
+    {% if latest_hb.cpu_per_core %}
+    <div class="card dm-card mt-3">
+        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-grid me-2"></i>Çekirdek Başına Kullanım</h6></div>
+        <div class="card-body py-3">
+            <div class="d-flex flex-wrap gap-2" id="coreGrid">
+                {% for pct in latest_hb.cpu_per_core %}
+                <div style="width:56px;text-align:center">
+                    <div style="font-size:.65rem;color:var(--dm-text-muted);font-weight:600">C{{ forloop.counter0 }}</div>
+                    <div style="height:60px;background:#f0f2f5;border-radius:6px;position:relative;overflow:hidden;margin:.25rem 0">
+                        <div style="position:absolute;bottom:0;left:0;right:0;height:{{ pct }}%;background:{% if pct >= 90 %}var(--dm-danger){% elif pct >= 75 %}var(--dm-warning){% else %}var(--dm-primary){% endif %};border-radius:6px;transition:height .4s"></div>
+                    </div>
+                    <div style="font-size:.7rem;font-weight:700">{{ pct|floatformat:0 }}%</div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <!-- ============================================================ -->
@@ -189,6 +227,47 @@
     </div>
     <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Disk Giriş/Çıkış</h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="diskChart" height="90"></canvas></div></div>
+
+    {% if latest_hb.disk_partitions %}
+    <div class="card dm-card mt-3">
+        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-hdd-stack me-2"></i>Disk Bölümleri</h6></div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table dm-table table-hover align-middle mb-0" style="font-size:.8rem">
+                    <thead><tr>
+                        <th class="px-4 py-2">Bölüm</th>
+                        <th class="py-2">Bağlama Noktası</th>
+                        <th class="py-2">Dosya Sistemi</th>
+                        <th class="py-2 text-end">Toplam</th>
+                        <th class="py-2 text-end">Kullanılan</th>
+                        <th class="py-2 text-end">Boş</th>
+                        <th class="py-2 px-4">Kullanım</th>
+                    </tr></thead>
+                    <tbody>
+                        {% for part in latest_hb.disk_partitions %}
+                        <tr>
+                            <td class="px-4 fw-medium">{{ part.device }}</td>
+                            <td>{{ part.mountpoint }}</td>
+                            <td><span class="dm-badge bg-secondary">{{ part.fstype }}</span></td>
+                            <td class="text-end">{{ part.total|filesizeformat }}</td>
+                            <td class="text-end" style="color:{% if part.percent >= 90 %}var(--dm-danger){% elif part.percent >= 75 %}var(--dm-warning){% else %}inherit{% endif %}">{{ part.used|filesizeformat }}</td>
+                            <td class="text-end" style="color:var(--dm-success)">{{ part.free|filesizeformat }}</td>
+                            <td class="px-4" style="min-width:120px">
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="progress dm-progress flex-grow-1" style="height:6px">
+                                        <div class="progress-bar {% if part.percent >= 90 %}bg-danger{% elif part.percent >= 75 %}bg-warning{% else %}bg-primary{% endif %}" style="width:{{ part.percent }}%"></div>
+                                    </div>
+                                    <span style="font-size:.7rem;font-weight:700;min-width:32px">{{ part.percent|floatformat:0 }}%</span>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <!-- ============================================================ -->
@@ -370,7 +449,9 @@ function init(hbs){
 }
 
 function refresh(){
+    showRefreshing(true);
     fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/stats/`).then(r=>r.json()).then(data=>{
+        showRefreshing(false);
         if(!data.heartbeats||!data.heartbeats.length)return;
         const d=data.heartbeats.slice().reverse(),lt=data.heartbeats[0];
         const lb=d.map(x=>{const t=new Date(x.timestamp);return t.getHours().toString().padStart(2,'0')+':'+t.getMinutes().toString().padStart(2,'0')+':'+t.getSeconds().toString().padStart(2,'0');});
@@ -399,8 +480,37 @@ function refresh(){
         document.getElementById('ramBar').style.width=lt.ram_percent+'%';
         document.getElementById('diskBar').style.width=lt.disk_percent+'%';
         document.getElementById('lastUpdate').textContent='Son: '+new Date(lt.timestamp).toLocaleTimeString('tr-TR');
-    }).catch(e=>console.error(e));
+    }).catch(e=>{ showRefreshing(false); console.error(e); });
 }
 fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/stats/`).then(r=>r.json()).then(d=>{init(d.heartbeats||[]);setInterval(refresh,15000);});
+
+// ========== 24 SAATLİK TREND ==========
+fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/hourly/`).then(r=>r.json()).then(data=>{
+    const hours = data.hours || [];
+    const el = document.getElementById('trendStatus');
+    if(!hours.length){
+        el.textContent = 'Henüz yeterli veri yok (ilk temizlik sonrası görünür)';
+        return;
+    }
+    el.textContent = `Son ${hours.length} saat`;
+    const lb = hours.map(h=>h.hour);
+    const ttOpts2={mode:'index',intersect:false,titleFont:{size:10},bodyFont:{size:11},padding:6,displayColors:true,boxWidth:8,boxHeight:8};
+    new Chart(document.getElementById('trendChart'),{type:'bar',data:{labels:lb,datasets:[
+        {type:'bar',label:'CPU Ort',data:hours.map(h=>h.cpu_avg),backgroundColor:'rgba(67,97,238,0.35)',borderColor:'rgba(67,97,238,.6)',borderWidth:1,borderRadius:2,order:3},
+        {type:'line',label:'CPU Max',data:hours.map(h=>h.cpu_max),borderColor:'#ef476f',backgroundColor:'transparent',fill:false,tension:0.3,pointRadius:2,pointHoverRadius:5,borderWidth:2,borderDash:[4,3],order:1},
+        {type:'line',label:'RAM Ort',data:hours.map(h=>h.ram_avg),borderColor:'#118ab2',backgroundColor:'rgba(17,138,178,0.15)',fill:true,tension:0.3,pointRadius:0,pointHoverRadius:4,borderWidth:2,order:2},
+    ]},options:{
+        responsive:true,animation:{duration:400},
+        scales:{
+            y:{beginAtZero:true,max:100,ticks:{callback:v=>v+'%',stepSize:20,font:{size:9},maxTicksLimit:6},grid:{color:'rgba(0,0,0,.06)'}},
+            x:{ticks:{font:{size:9},maxTicksLimit:12},grid:{display:false}}
+        },
+        interaction:{mode:'index',intersect:false},
+        plugins:{
+            legend:{labels:{font:{size:9,weight:600},usePointStyle:true,padding:8}},
+            tooltip:{...ttOpts2,callbacks:{label:ctx=>ctx.dataset.label+': %'+ctx.parsed.y.toFixed(1)}}
+        }
+    }});
+}).catch(()=>{document.getElementById('trendStatus').textContent='Veri alınamadı';});
 </script>
 {% endblock %}

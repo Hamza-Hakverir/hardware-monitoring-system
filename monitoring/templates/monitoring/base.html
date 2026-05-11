@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}DevMonitor{% endblock %} — Donanım İzleme Sistemi</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%234361ee'/%3E%3Cpath d='M3 5h10M3 8h7M3 11h5' stroke='%23fff' stroke-width='1.5' stroke-linecap='round'/%3E%3Ccircle cx='12' cy='9.5' r='2' fill='%2306d6a0'/%3E%3C/svg%3E">
     <!-- Google Fonts — Inter (modern, temiz) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -262,6 +263,9 @@
 </head>
 <body class="d-flex flex-column min-vh-100">
 
+    <!-- Toast Bildirimleri -->
+    <div class="position-fixed top-0 end-0 p-3" style="z-index:9999" id="toastContainer"></div>
+
     <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark dm-navbar">
         <div class="container">
@@ -273,32 +277,38 @@
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto gap-1">
+                    {% with url_name=request.resolver_match.url_name %}
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ui_dashboard' %}">
+                        <a class="nav-link{% if url_name == 'ui_dashboard' %} active{% endif %}" href="{% url 'ui_dashboard' %}">
                             <i class="bi bi-speedometer2 me-1"></i>Dashboard
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ui_device_list' %}">
+                        <a class="nav-link{% if url_name == 'ui_device_list' or url_name == 'ui_device_detail' %} active{% endif %}" href="{% url 'ui_device_list' %}">
                             <i class="bi bi-pc-display me-1"></i>Cihazlar
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ui_alert_list' %}">
+                        <a class="nav-link{% if url_name == 'ui_alert_list' %} active{% endif %}" href="{% url 'ui_alert_list' %}">
                             <i class="bi bi-exclamation-triangle me-1"></i>Uyarılar
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ui_add_location' %}">
+                        <a class="nav-link{% if url_name == 'ui_add_location' %} active{% endif %}" href="{% url 'ui_add_location' %}">
                             <i class="bi bi-geo-alt me-1"></i>Konum Ekle
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="{% url 'ui_add_alert' %}">
+                        <a class="nav-link{% if url_name == 'ui_add_alert' %} active{% endif %}" href="{% url 'ui_add_alert' %}">
                             <i class="bi bi-plus-circle me-1"></i>Uyarı Ekle
                         </a>
                     </li>
+                    {% endwith %}
                 </ul>
+                <button id="darkToggle" class="btn btn-sm ms-3 border-0" title="Tema Değiştir"
+                        style="background:rgba(255,255,255,0.1);color:#fff;border-radius:8px;padding:.4rem .7rem;">
+                    <i class="bi bi-moon-stars-fill" id="darkIcon"></i>
+                </button>
             </div>
         </div>
     </nav>
@@ -321,6 +331,53 @@
 
     <!-- Bootstrap 5 JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+    // ============================================================
+    // GLOBAL YARDIMCI — Toast + Refresh Indicator
+    // ============================================================
+    function showToast(message, type) {
+        const colors = { success: '#06d6a0', danger: '#ef476f', info: '#118ab2', warning: '#ffd166' };
+        const icons  = { success: 'check-circle-fill', danger: 'x-circle-fill', info: 'info-circle-fill', warning: 'exclamation-triangle-fill' };
+        const id = 'toast-' + Date.now();
+        const html = `<div id="${id}" class="toast align-items-center border-0 show mb-2"
+            style="background:${colors[type]||'#4361ee'};color:${type==='warning'?'#333':'#fff'};border-radius:10px;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,.15)">
+            <div class="d-flex align-items-center gap-2 p-3">
+                <i class="bi bi-${icons[type]||'bell-fill'}" style="font-size:1.1rem"></i>
+                <span style="font-size:.85rem;font-weight:600;flex:1">${message}</span>
+                <button type="button" class="btn-close btn-close-white btn-sm" onclick="document.getElementById('${id}').remove()"></button>
+            </div>
+        </div>`;
+        document.getElementById('toastContainer').insertAdjacentHTML('beforeend', html);
+        setTimeout(() => { const el = document.getElementById(id); if(el) el.remove(); }, 4000);
+    }
+
+    // Refresh göstergesi — sağ altta küçük animasyonlu nokta
+    function showRefreshing(show) {
+        let el = document.getElementById('refreshDot');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'refreshDot';
+            el.style.cssText = 'position:fixed;bottom:1.2rem;right:1.2rem;width:10px;height:10px;border-radius:50%;background:#4361ee;z-index:9998;transition:opacity .3s';
+            document.body.appendChild(el);
+        }
+        el.style.opacity = show ? '1' : '0';
+    }
+
+    // Dark mode — localStorage ile kalıcı
+    (function() {
+        const saved = localStorage.getItem('dm-theme') || 'light';
+        document.documentElement.setAttribute('data-bs-theme', saved);
+        const icon = document.getElementById('darkIcon');
+        if (icon) icon.className = saved === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill';
+    })();
+    document.getElementById('darkToggle').addEventListener('click', function() {
+        const html = document.documentElement;
+        const next = html.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-bs-theme', next);
+        localStorage.setItem('dm-theme', next);
+        document.getElementById('darkIcon').className = next === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill';
+    });
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>

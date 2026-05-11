@@ -24,9 +24,10 @@ import psutil
 import requests
 import subprocess
 import json
+import argparse
 
 # ============================================================
-# AYARLAR
+# AYARLAR (komut satırı argümanları main bloğunda override eder)
 # ============================================================
 SERVER_URL = "http://127.0.0.1:8000/api/monitoring"
 HEARTBEAT_INTERVAL = 15  # saniye
@@ -113,6 +114,27 @@ def get_battery_info():
     return battery.percent, battery.power_plugged
 
 
+def get_cpu_temperature():
+    """CPU sıcaklığını döndürür. Desteklenmeyen platformlarda None."""
+    try:
+        temps = psutil.sensors_temperatures()
+        if not temps:
+            return None
+        # Öncelik sırası: coretemp (Linux/Intel), k10temp (AMD), acpitz, cpu-thermal (ARM)
+        for key in ('coretemp', 'k10temp', 'acpitz', 'cpu-thermal', 'cpu_thermal'):
+            if key in temps:
+                entries = temps[key]
+                if entries:
+                    return round(entries[0].current, 1)
+        # Hiçbiri yoksa ilk bulunanı al
+        first = next(iter(temps.values()))
+        if first:
+            return round(first[0].current, 1)
+    except (AttributeError, Exception):
+        pass
+    return None
+
+
 def get_system_info():
     return {
         "mac_address": get_mac_address(),
@@ -131,27 +153,29 @@ def get_system_info():
 # TOP İŞLEMLER — En çok kaynak kullanan 10 uygulama
 # ============================================================
 
-def get_top_processes(count=10):
-    """En çok CPU ve RAM kullanan top 10 işlemi döndürür.
-    Her işlem: {"name": "Safari", "cpu": 12.5, "mem_mb": 387.2, "threads": 8}
+def collect_process_stats(top_count=10):
+    """Tüm process'leri tek geçişte toplar.
+    Döner: (total_threads, top_count adet süreç listesi)
     """
-    procs = []
+    all_procs = []
+    total_threads = 0
     for proc in psutil.process_iter(['name', 'cpu_percent', 'memory_info', 'num_threads']):
         try:
             info = proc.info
+            threads = info['num_threads'] or 0
+            total_threads += threads
             mem_mb = round(info['memory_info'].rss / (1024 * 1024), 1) if info['memory_info'] else 0
-            procs.append({
+            all_procs.append({
                 'name': info['name'] or 'Bilinmeyen',
                 'cpu': info['cpu_percent'] or 0,
                 'mem_mb': mem_mb,
-                'threads': info['num_threads'] or 0,
+                'threads': threads,
             })
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
 
-    # CPU'ya göre sırala, en yüksek ilk
-    procs.sort(key=lambda x: x['cpu'], reverse=True)
-    return procs[:count]
+    all_procs.sort(key=lambda x: x['cpu'], reverse=True)
+    return total_threads, all_procs[:top_count]
 
 
 # ============================================================
@@ -164,6 +188,7 @@ def get_realtime_usage():
     # --- CPU ---
     cpu_times = psutil.cpu_times_percent(interval=1)
     cpu_freq_obj = psutil.cpu_freq()
+    cpu_per_core = psutil.cpu_percent(percpu=True)  # her çekirdek ayrı [%]
 
     # --- RAM / Bellek ---
     mem = psutil.virtual_memory()
@@ -171,6 +196,24 @@ def get_realtime_usage():
 
     # --- Disk ---
     disk_io = psutil.disk_io_counters()
+    disk_parts = []
+    try:
+        for part in psutil.disk_partitions(all=False):
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+                disk_parts.append({
+                    'device': part.device,
+                    'mountpoint': part.mountpoint,
+                    'fstype': part.fstype,
+                    'total': usage.total,
+                    'used': usage.used,
+                    'free': usage.free,
+                    'percent': usage.percent,
+                })
+            except (PermissionError, OSError):
+                continue
+    except Exception:
+        pass
 
     # --- Ağ ---
     net_io = psutil.net_io_counters()
@@ -178,18 +221,12 @@ def get_realtime_usage():
     # --- Batarya ---
     battery_pct, battery_plug = get_battery_info()
 
-    # --- İşlemler ---
-    pids = psutil.pids()
-    total_threads = 0
-    for pid in pids:
-        try:
-            p = psutil.Process(pid)
-            total_threads += p.num_threads()
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+    # --- CPU Sıcaklığı ---
+    cpu_temp = get_cpu_temperature()
 
-    # --- Top İşlemler ---
-    top_procs = get_top_processes(10)
+    # --- İşlemler + Top Listesi (tek geçiş) ---
+    pids = psutil.pids()
+    total_threads, top_procs = collect_process_stats(10)
 
     return {
         # Ana metrikler (cpu_times_percent zaten 1sn ölçtü, idle dışı = kullanım)
@@ -206,6 +243,8 @@ def get_realtime_usage():
         "cpu_idle": getattr(cpu_times, 'idle', 0),
         "cpu_freq": cpu_freq_obj.current if cpu_freq_obj else 0,
         "thread_count": total_threads,
+        "cpu_per_core": cpu_per_core,
+        "cpu_temperature": cpu_temp,
 
         # Bellek detay
         "memory_total": mem.total,
@@ -218,6 +257,7 @@ def get_realtime_usage():
         # Disk I/O
         "disk_read_bytes": disk_io.read_bytes if disk_io else 0,
         "disk_write_bytes": disk_io.write_bytes if disk_io else 0,
+        "disk_partitions": disk_parts,
 
         # Ağ
         "net_bytes_sent": net_io.bytes_sent,
@@ -240,17 +280,24 @@ def register_device(info):
         "os_info": info["os_info"],
         "is_active": True,
     }
-    try:
-        response = requests.post(f"{SERVER_URL}/devices/register/", json=payload, timeout=5)
-        if response.status_code == 201:
-            print("[OK] Cihaz başarıyla kaydedildi.")
-        elif response.status_code == 400 and "mac_address" in response.text:
-            print("[INFO] Bu cihaz zaten sistemde kayıtlı.")
-        else:
-            print(f"[HATA] Kayıt: {response.text}")
-    except requests.exceptions.ConnectionError:
-        print("[HATA] Sunucuya ulaşılamıyor! Django runserver çalışıyor mu?")
-        raise SystemExit(1)
+    delays = [5, 10, 20, 30, 60]
+    for attempt, delay in enumerate(delays, start=1):
+        try:
+            response = requests.post(f"{SERVER_URL}/devices/register/", json=payload, timeout=5)
+            if response.status_code == 201:
+                print("[OK] Cihaz başarıyla kaydedildi.")
+            elif response.status_code == 400 and "mac_address" in response.text:
+                print("[INFO] Bu cihaz zaten sistemde kayıtlı.")
+            else:
+                print(f"[HATA] Kayıt: {response.text}")
+            return
+        except requests.exceptions.ConnectionError:
+            if attempt < len(delays):
+                print(f"[HATA] Sunucuya ulaşılamıyor. {delay}sn sonra tekrar deneniyor... ({attempt}/{len(delays)})")
+                time.sleep(delay)
+            else:
+                print("[HATA] Sunucu {len(delays)} denemede de yanıt vermedi. Agent durduruluyor.")
+                raise SystemExit(1)
 
 
 def send_hardware_spec(info):
@@ -290,6 +337,8 @@ def send_heartbeat(mac_address, usage):
         "cpu_idle": usage["cpu_idle"],
         "cpu_freq": usage["cpu_freq"],
         "thread_count": usage["thread_count"],
+        "cpu_per_core": usage["cpu_per_core"],
+        "cpu_temperature": usage["cpu_temperature"],
         # Bellek detay
         "memory_total": usage["memory_total"],
         "memory_used": usage["memory_used"],
@@ -300,6 +349,7 @@ def send_heartbeat(mac_address, usage):
         # Disk
         "disk_read_bytes": usage["disk_read_bytes"],
         "disk_write_bytes": usage["disk_write_bytes"],
+        "disk_partitions": usage["disk_partitions"],
         # Ağ
         "net_bytes_sent": usage["net_bytes_sent"],
         "net_bytes_recv": usage["net_bytes_recv"],
@@ -340,9 +390,20 @@ def send_heartbeat(mac_address, usage):
 # ============================================================
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="DevMonitor Donanım İzleme Ajanı")
+    parser.add_argument('--server', default=SERVER_URL,
+                        help=f'Sunucu adresi (varsayılan: {SERVER_URL})')
+    parser.add_argument('--interval', type=int, default=HEARTBEAT_INTERVAL,
+                        help=f'Heartbeat aralığı saniye cinsinden (varsayılan: {HEARTBEAT_INTERVAL})')
+    args = parser.parse_args()
+    SERVER_URL = args.server.rstrip('/')
+    HEARTBEAT_INTERVAL = args.interval
+
     print("=" * 60)
     print("  DONANIM İZLEME AJANI v2.0 — Etkinlik Monitörü Modu")
     print("=" * 60)
+    print(f"[SUNUCU]   {SERVER_URL}")
+    print(f"[ARALIK]   Her {HEARTBEAT_INTERVAL} saniyede bir")
 
     info = get_system_info()
     print(f"[MAC]      {info['mac_address']}")

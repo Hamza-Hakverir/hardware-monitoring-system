@@ -27,6 +27,7 @@
                         <th class="py-3">Donanım</th>
                         <th class="py-3">Yük (CPU/RAM)</th>
                         <th class="py-3">Son Görülme</th>
+                        <th class="py-3">Uptime</th>
                         <th class="py-3">Durum</th>
                         <th class="py-3 text-end px-4">İşlem</th>
                     </tr>
@@ -53,6 +54,7 @@
                             {% else %}
                                 <span class="text-muted fst-italic">Atanmamış</span>
                             {% endif %}
+                        </td>
                         <td>
                             {% if device.hardware %}
                                 <small>
@@ -64,17 +66,26 @@
                             {% endif %}
                         </td>
                         <td>
-                            {% if device.latest_heartbeat %}
+                            {% with lhb=device.prefetched_heartbeats.0 %}
+                            {% if lhb %}
                                 <div class="d-flex flex-column gap-1" style="font-size:0.8rem; font-weight:600;">
-                                    <div class="text-primary"><i class="bi bi-activity me-1"></i> %{{ device.latest_heartbeat.cpu_percent|floatformat:1 }}</div>
-                                    <div class="text-info"><i class="bi bi-memory me-1"></i> %{{ device.latest_heartbeat.ram_percent|floatformat:1 }}</div>
+                                    <div class="text-primary"><i class="bi bi-activity me-1"></i> %{{ lhb.cpu_percent|floatformat:1 }}</div>
+                                    <div class="text-info"><i class="bi bi-memory me-1"></i> %{{ lhb.ram_percent|floatformat:1 }}</div>
                                 </div>
                             {% else %}
                                 <span class="text-muted fst-italic">—</span>
                             {% endif %}
+                            {% endwith %}
                         </td>
                         <td>
                             <small class="text-muted">{{ device.last_seen|date:"d M H:i:s" }}</small>
+                        </td>
+                        <td>
+                            {% if device.uptime_display %}
+                                <small class="text-success fw-semibold"><i class="bi bi-clock-history me-1"></i>{{ device.uptime_display }}</small>
+                            {% else %}
+                                <small class="text-muted">—</small>
+                            {% endif %}
                         </td>
                         <td>
                             {% if device.is_active %}
@@ -107,6 +118,26 @@
         </div>
     </div>
 </div>
+
+{% if page_obj.paginator.num_pages > 1 %}
+<nav class="mt-3 d-flex justify-content-center">
+    <ul class="pagination">
+        {% if page_obj.has_previous %}
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}"><i class="bi bi-chevron-left"></i></a></li>
+        {% endif %}
+        {% for num in page_obj.paginator.page_range %}
+            {% if page_obj.number == num %}
+            <li class="page-item active"><span class="page-link">{{ num }}</span></li>
+            {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+            <li class="page-item"><a class="page-link" href="?page={{ num }}">{{ num }}</a></li>
+            {% endif %}
+        {% endfor %}
+        {% if page_obj.has_next %}
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}"><i class="bi bi-chevron-right"></i></a></li>
+        {% endif %}
+    </ul>
+</nav>
+{% endif %}
 {% endblock %}
 
 {% block extra_js %}

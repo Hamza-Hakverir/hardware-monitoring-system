@@ -1,12 +1,14 @@
 from django.db import models
+from django.utils import timezone
 
 
 class Device(models.Model):
-    mac_address = models.CharField(max_length=17, primary_key=True, unique=True)
-    os_info = models.CharField(max_length=255)
-    is_active = models.BooleanField(default=True)
-    last_seen = models.DateTimeField(auto_now=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    mac_address   = models.CharField(max_length=17, primary_key=True, unique=True)
+    os_info       = models.CharField(max_length=255)
+    is_active     = models.BooleanField(default=True)
+    last_seen     = models.DateTimeField(auto_now=True)
+    created_at    = models.DateTimeField(auto_now_add=True)
+    went_online_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         indexes = [
@@ -19,6 +21,22 @@ class Device(models.Model):
     @property
     def latest_heartbeat(self):
         return self.heartbeats.first()
+
+    @property
+    def uptime_display(self):
+        """Online süresini '3 sa 24 dk' formatında döndürür."""
+        if not self.is_active or not self.went_online_at:
+            return None
+        delta = timezone.now() - self.went_online_at
+        total_seconds = int(delta.total_seconds())
+        days    = total_seconds // 86400
+        hours   = (total_seconds % 86400) // 3600
+        minutes = (total_seconds % 3600) // 60
+        if days:
+            return f'{days} gün {hours} sa'
+        if hours:
+            return f'{hours} sa {minutes} dk'
+        return f'{minutes} dk'
 
 
 class Location(models.Model):
@@ -67,6 +85,8 @@ class HeartbeatLog(models.Model):
     cpu_idle = models.FloatField(default=0)             # Boş CPU (%)
     cpu_freq = models.FloatField(default=0)             # CPU frekansı (MHz)
     thread_count = models.IntegerField(default=0)       # İş parçacığı sayısı
+    cpu_per_core   = models.JSONField(default=list, blank=True)      # Her çekirdek kullanımı [%]
+    cpu_temperature = models.FloatField(null=True, blank=True)       # CPU sıcaklığı (°C), platform desteklemiyorsa None
 
     # ============================================================
     # BELLEK DETAY — Etkinlik Monitörü Bellek sekmesi
@@ -83,6 +103,7 @@ class HeartbeatLog(models.Model):
     # ============================================================
     disk_read_bytes = models.BigIntegerField(default=0)   # Toplam okunan (byte)
     disk_write_bytes = models.BigIntegerField(default=0)  # Toplam yazılan (byte)
+    disk_partitions = models.JSONField(default=list, blank=True)  # Bölüm listesi
 
     # ============================================================
     # AĞ DETAY — Etkinlik Monitörü Ağ sekmesi
@@ -111,9 +132,37 @@ class HeartbeatLog(models.Model):
         return f"{self.device_id} - CPU:{self.cpu_percent}% RAM:{self.ram_percent}% - {self.timestamp}"
 
 
+class HourlyAggregate(models.Model):
+    """Bir cihazın belirli bir saate ait ortalama metriklerini saklar."""
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='hourly_stats')
+    hour = models.DateTimeField()  # Saatin başlangıcı (dakika/saniye=0)
+
+    cpu_avg = models.FloatField(default=0)
+    cpu_max = models.FloatField(default=0)
+    ram_avg = models.FloatField(default=0)
+    ram_max = models.FloatField(default=0)
+    disk_avg = models.FloatField(default=0)
+    sample_count = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = ('device', 'hour')
+        ordering = ['-hour']
+        indexes = [
+            models.Index(fields=['device', '-hour'], name='hourly_device_hour_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.device_id} @ {self.hour:%Y-%m-%d %H:00} — CPU avg:{self.cpu_avg:.1f}%"
+
+
 class Alert(models.Model):
+    SEVERITY_WARNING  = 'WARNING'
+    SEVERITY_CRITICAL = 'CRITICAL'
+    SEVERITY_CHOICES  = [(SEVERITY_WARNING, 'Uyarı'), (SEVERITY_CRITICAL, 'Kritik')]
+
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='alerts')
     alert_type = models.CharField(max_length=50)
+    severity   = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default=SEVERITY_CRITICAL)
     message = models.TextField()
     is_resolved = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
