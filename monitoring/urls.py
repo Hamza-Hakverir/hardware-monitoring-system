@@ -7,9 +7,12 @@ urlpatterns = [
     # ============================================================
 
     # Cihazlar
+    # ⚠️  SIRALAMA ÖNEMLİ: 'register/' sabit URL'si, <str:pk> dinamik URL'sinden
+    # ÖNCE gelmelidir. Django URL'leri yukarıdan aşağıya sırayla eşleştirir;
+    # sıralama değiştirilirse 'register/' bir MAC adresi gibi işlenip hata verir.
     path('devices/', views.list_devices, name='list_devices'),
-    path('devices/register/', views.register_device, name='register_device'),
-    path('devices/<str:pk>/', views.device_detail, name='device_detail'),
+    path('devices/register/', views.register_device, name='register_device'),  # ← sabit, önce
+    path('devices/<str:pk>/', views.device_detail, name='device_detail'),      # ← dinamik, sonra
     path('devices/<str:pk>/stats/', views.device_stats, name='device_stats'),
     path('devices/<str:pk>/hourly/', views.device_hourly_trend, name='device_hourly_trend'),
     path('devices/<str:pk>/status-log/', views.device_status_log, name='device_status_log'),

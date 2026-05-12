@@ -565,23 +565,38 @@ fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/status-log/`)
 .then(r=>r.json())
 .then(data=>{
     const logs=data.logs||[], isActive=data.is_currently_active;
+    const wentOnlineAt = data.went_online_at ? new Date(data.went_online_at).getTime() : null;
     const now=Date.now(), startMs=now-DAYS*DAY_MS;
     const container=document.getElementById('timelineContainer');
 
     // Tüm periyottaki segmentleri hesapla
     const allSegs=[];
-    let state,segStart;
     if(!logs.length){
         allSegs.push({start:startMs,end:now,online:isActive});
     } else {
-        state=!logs[0].went_online; segStart=startMs;
-        logs.forEach(l=>{
+        // is_currently_active'den geriye zincirleyerek başlangıç durumunu bul
+        const statesAfter = new Array(logs.length);
+        let cur = isActive;
+        for(let i=logs.length-1; i>=0; i--){
+            statesAfter[i] = cur;
+            cur = !logs[i].went_online;
+        }
+        // cur = zincirden çıkan başlangıç durumu
+        // Düzeltme: went_online_at 7 günlük pencere İÇİNDE ise cihaz o tarihten önce
+        // offline'dı (stale kayıttan gelen sahte "online" başlangıcını engelle)
+        let startState = cur;
+        if(startState && wentOnlineAt && wentOnlineAt > startMs){
+            startState = false;
+        }
+        let segStart=startMs, state=startState;
+        logs.forEach((l,i)=>{
             const t=new Date(l.timestamp).getTime();
             if(t>segStart) allSegs.push({start:segStart,end:t,online:state});
-            segStart=t; state=l.went_online;
+            segStart=t; state=statesAfter[i];
         });
         allSegs.push({start:segStart,end:now,online:state});
     }
+
 
     // 7 günlük satır oluştur
     let html='<div style="font-family:var(--dm-font,inherit)">';

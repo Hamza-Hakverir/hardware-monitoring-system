@@ -25,10 +25,27 @@ load_dotenv(os.path.join(BASE_DIR, '.env'))
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default')
-
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
+
+_raw_secret = os.getenv('SECRET_KEY', '')
+if not _raw_secret:
+    if DEBUG:
+        # Geliştirme ortamı: fallback key kullan ama uyar
+        import warnings
+        _raw_secret = 'django-insecure-devmonitor-local-only'
+        warnings.warn(
+            '[DevMonitor] SECRET_KEY .env dosyasında tanımlı değil! '
+            'Bu key SADECE yerel geliştirme için kullanılabilir.',
+            stacklevel=2,
+        )
+    else:
+        # Production'da SECRET_KEY kesinlikle .env'den gelmeli
+        raise ValueError(
+            '[DevMonitor] HATA: SECRET_KEY ortam değişkeni production modunda '
+            'tanımlanmalıdır! .env dosyasını kontrol edin.'
+        )
+SECRET_KEY = _raw_secret
 
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
 

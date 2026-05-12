@@ -1,5 +1,8 @@
 from django.contrib import admin
-from .models import Device, Location, HardwareSpec, HeartbeatLog, Alert
+from .models import (
+    Device, Location, HardwareSpec, HeartbeatLog, Alert,
+    Tag, DeviceThreshold, DeviceStatusLog, HourlyAggregate,
+)
 
 
 @admin.register(Device)
@@ -47,8 +50,8 @@ class HeartbeatLogAdmin(admin.ModelAdmin):
 
 @admin.register(Alert)
 class AlertAdmin(admin.ModelAdmin):
-    list_display = ('device', 'alert_type', 'message', 'is_resolved', 'created_at')
-    list_filter = ('is_resolved', 'alert_type')
+    list_display = ('device', 'alert_type', 'severity', 'message', 'is_resolved', 'notified', 'created_at')
+    list_filter = ('is_resolved', 'alert_type', 'severity')
     search_fields = ('device__mac_address', 'message')
     ordering = ('-created_at',)
     actions = ['mark_resolved']
@@ -56,3 +59,51 @@ class AlertAdmin(admin.ModelAdmin):
     @admin.action(description='Secili uyarilari cozuldu olarak isaretle')
     def mark_resolved(self, request, queryset):
         queryset.update(is_resolved=True)
+
+
+# ============================================================
+# YENİ KAYITLAR — Tag, DeviceThreshold, DeviceStatusLog, HourlyAggregate
+# ============================================================
+
+@admin.register(Tag)
+class TagAdmin(admin.ModelAdmin):
+    list_display = ('name', 'color', 'cihaz_sayisi')
+    search_fields = ('name',)
+    ordering = ('name',)
+
+    @admin.display(description='Cihaz Sayısı')
+    def cihaz_sayisi(self, obj):
+        return obj.devices.count()
+
+
+@admin.register(DeviceThreshold)
+class DeviceThresholdAdmin(admin.ModelAdmin):
+    list_display = (
+        'device',
+        'cpu_warning', 'cpu_critical',
+        'ram_warning', 'ram_critical',
+        'disk_warning', 'disk_critical',
+    )
+    search_fields = ('device__mac_address',)
+    list_select_related = ('device',)
+
+
+@admin.register(DeviceStatusLog)
+class DeviceStatusLogAdmin(admin.ModelAdmin):
+    list_display = ('device', 'durum', 'timestamp')
+    list_filter = ('went_online',)
+    ordering = ('-timestamp',)
+    list_select_related = ('device',)
+
+    @admin.display(description='Durum')
+    def durum(self, obj):
+        return '🟢 Online' if obj.went_online else '🔴 Offline'
+
+
+@admin.register(HourlyAggregate)
+class HourlyAggregateAdmin(admin.ModelAdmin):
+    list_display = ('device', 'hour', 'cpu_avg', 'cpu_max', 'ram_avg', 'ram_max', 'disk_avg', 'sample_count')
+    list_filter = ('device',)
+    ordering = ('-hour',)
+    list_select_related = ('device',)
+

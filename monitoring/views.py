@@ -699,6 +699,7 @@ def device_status_log(request, pk):
     return Response({
         'device': pk,
         'is_currently_active': device.is_active,
+        'went_online_at': device.went_online_at.isoformat() if device.went_online_at else None,
         'logs': [
             {'went_online': l['went_online'], 'timestamp': l['timestamp'].isoformat()}
             for l in logs
