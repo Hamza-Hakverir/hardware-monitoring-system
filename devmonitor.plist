@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+DevMonitor Agent — macOS LaunchDaemon Şablonu
+================================================
+Bu dosya elle düzenlenmez; setup_agent.py aşağıdaki yer tutucuları (__ ile
+işaretli) gerçek değerlerle değiştirip /Library/LaunchDaemons/ altına kopyalar.
+
+LaunchAgent (~/Library/LaunchAgents) DEĞİL, LaunchDaemon (/Library/LaunchDaemons)
+olarak kurulması kasıtlıdır: LaunchAgent oturum açan kullanıcı olarak çalışır ve
+o kullanıcı onu Activity Monitor'den serbestçe kapatabilir. LaunchDaemon root
+olarak çalışır ve sadece admin yetkili bir kullanıcı `launchctl unload`
+edebilir/sonlandırabilir — Windows'taki sc sdset / Linux'taki systemd
+system-wide unit ile aynı yetki kısıtlaması mantığı.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.devmonitor.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__PYTHON_EXE__</string>
+        <string>__AGENT_PATH__</string>
+        <string>--server</string>
+        <string>__SERVER_URL__</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WORKDIR__</string>
+
+    <!-- Çökme koruması: agent.py her ne sebeple kapanırsa kapansın (çökme,
+         normal çıkış, beklenmedik sinyal) launchd onu yeniden başlatır.
+         systemd'deki Restart=always / Windows'taki sc failure ile eşdeğer. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Art arda çok hızlı yeniden başlatmayı önlemek için minimum bekleme (sn) -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>__LOG_PATH__</string>
+    <key>StandardErrorPath</key>
+    <string>__LOG_PATH__</string>
+</dict>
+</plist>

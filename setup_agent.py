@@ -1,12 +1,12 @@
 """
 DevMonitor Agent Kurulum Sihirbazı
 ====================================
-İzlenecek hedef bilgisayara (Windows / Linux) agent.py'yi kurar ve arka
-planda sürekli çalışacak şekilde yapılandırır:
+İzlenecek hedef bilgisayara (Windows / Linux / macOS) agent.py'yi kurar ve
+arka planda sürekli çalışacak şekilde yapılandırır:
     - Windows  → install_service.py üzerinden Windows Servisi (+ secure: çökme
                  koruması ve yetki kısıtlaması)
     - Linux    → devmonitor.service şablonundan systemd unit'i kurar
-    - macOS    → otomatik servis kurulumu yok; manuel çalıştırma talimatı verir
+    - macOS    → devmonitor.plist şablonundan LaunchDaemon kurar (root, KeepAlive)
 
 Bu script SADECE agent.py'nin bağımlılıklarını (psutil, requests) kurar —
 Django/DRF/psycopg2 gibi sunucu bağımlılıkları (requirements.txt) hedef
@@ -102,10 +102,42 @@ def setup_linux(server_url):
 
 
 def setup_macos(server_url):
+    # LaunchDaemon (LaunchAgent DEĞİL) kasıtlı: root olarak çalışır, sadece admin
+    # yetkili kullanıcı durdurabilir — bkz. devmonitor.plist içindeki not.
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        print("[HATA] macOS'ta LaunchDaemon kurmak için root yetkisi gerekir")
+        print("       (bu sayede amatör bir kullanıcı Activity Monitor'den kapatamaz).")
+        print(f"       Tekrar deneyin: sudo {sys.executable} {os.path.abspath(__file__)}")
+        sys.exit(1)
+
     agent_path = os.path.join(THIS_DIR, "agent.py")
-    print("\n[BİLGİ] macOS için otomatik servis kurulumu (launchd) henüz desteklenmiyor.")
-    print("        Agent'ı arka planda çalıştırmak için:")
-    print(f"        nohup {sys.executable} {agent_path} --server {server_url} > devmonitor.log 2>&1 &")
+    log_path = os.path.join(THIS_DIR, "devmonitor.log")
+    template_path = os.path.join(THIS_DIR, "devmonitor.plist")
+    with open(template_path, encoding="utf-8") as f:
+        content = f.read()
+
+    content = (
+        content.replace("__PYTHON_EXE__", sys.executable)
+               .replace("__AGENT_PATH__", agent_path)
+               .replace("__SERVER_URL__", server_url)
+               .replace("__WORKDIR__", THIS_DIR)
+               .replace("__LOG_PATH__", log_path)
+    )
+
+    dest = "/Library/LaunchDaemons/com.devmonitor.agent.plist"
+    print(f"\n[2/3] LaunchDaemon dosyası yazılıyor: {dest}")
+    with open(dest, "w", encoding="utf-8") as f:
+        f.write(content)
+    _run(["chown", "root:wheel", dest])
+    _run(["chmod", "644", dest])
+
+    print("\n[3/3] Servis yükleniyor ve başlatılıyor...")
+    _run(["launchctl", "load", "-w", dest])
+
+    print("\n[OK] Kurulum tamamlandı.")
+    print("     Durum kontrolü : sudo launchctl list | grep devmonitor")
+    print(f"     Loglar         : tail -f {log_path}")
+    print(f"     Yetkisiz durdurma denemesi (sudo OLMADAN): launchctl unload {dest} → reddedilmeli")
 
 
 def main():

@@ -89,6 +89,7 @@ hardware_monitoring_system/
 ├── setup_agent.py           # Hedef bilgisayara agent kurulum sihirbazı (Windows/Linux)
 ├── install_service.py       # Windows servis yükleyici (pywin32) + secure (ACL kısıtlaması)
 ├── devmonitor.service       # Linux systemd servis dosyası (sertleştirilmiş)
+├── devmonitor.plist         # macOS LaunchDaemon şablonu (KeepAlive, root)
 ├── CALISTIR.bat             # Windows çift tıklama kısayolu
 ├── manage.py
 ├── requirements.txt
@@ -328,10 +329,13 @@ python setup_agent.py
 ```
 
 Script sırasıyla: agent bağımlılıklarını (`psutil`, `requests` — **sunucu
-bağımlılıkları değil**) kurar, sunucu adresini sorar, platforma göre Windows
-Servisi (`install_service.py install` + `secure` + `start`) veya Linux systemd
-unit'i (`/etc/systemd/system/devmonitor.service`, root gerektirir) kurup
-başlatır. macOS'ta otomatik servis kurulumu yoktur, manuel komut önerilir.
+bağımlılıkları değil**) kurar, sunucu adresini sorar, platforma göre:
+- **Windows** → Windows Servisi (`install_service.py install` + `secure` + `start`)
+- **Linux** → systemd unit'i (`/etc/systemd/system/devmonitor.service`, root gerektirir)
+- **macOS** → LaunchDaemon (`/Library/LaunchDaemons/com.devmonitor.agent.plist`,
+  `devmonitor.plist` şablonundan, `sudo` gerektirir)
+
+kurup başlatır.
 
 ### Erişim Adresleri
 
@@ -418,6 +422,24 @@ DevMonitorAgent` ile kurtarma aksiyonlarını görebilirsiniz.
   polkit yetkisi gerektirir — ek bir ayara gerek yoktur. Doğrulamak için
   yetkisiz bir oturumdan (sudo OLMADAN) `systemctl stop devmonitor` deneyin;
   "Interactive authentication required" hatası almalısınız.
+
+### macOS
+
+`devmonitor.plist`, agent.py'yi bir **LaunchDaemon** olarak çalıştırır
+(`setup_agent.py` ile `/Library/LaunchDaemons/com.devmonitor.agent.plist`'e
+kurulur):
+
+- **`KeepAlive=true`** — agent.py ne sebeple kapanırsa kapansın (çökme, normal
+  çıkış) launchd onu yeniden başlatır. Linux'taki `Restart=always` / Windows'taki
+  `sc failure` ile eşdeğer.
+- **LaunchAgent DEĞİL, LaunchDaemon:** LaunchAgent (`~/Library/LaunchAgents`)
+  oturum açan kullanıcı olarak çalışır ve o kullanıcı Activity Monitor'den
+  serbestçe kapatabilir. LaunchDaemon (`/Library/LaunchDaemons`) **root**
+  olarak çalışır — kurmak `sudo` gerektirir, ve standart bir kullanıcı
+  `launchctl unload`/Activity Monitor ile durduramaz.
+- Doğrulama: `sudo launchctl list | grep devmonitor` ile durumu, yetkisiz bir
+  oturumdan (sudo OLMADAN) `launchctl unload /Library/LaunchDaemons/com.devmonitor.agent.plist`
+  deneyerek reddedildiğini görebilirsiniz.
 
 ---
 

@@ -382,6 +382,16 @@ gereksinimi Linux'ta ek bir ayar gerektirmeden zaten sağlanıyor: bu bir sistem
 geneli (system-wide) unit olduğu için `systemctl stop devmonitor` zaten
 root/sudo veya polkit yetkisi ister.
 
+**macOS tarafı (`devmonitor.plist`):** `KeepAlive=true` ile launchd, agent.py
+ne sebeple kapanırsa kapansın (çökme veya normal çıkış) yeniden başlatır —
+Linux/Windows'taki mekanizmalarla eşdeğer. Kasıtlı olarak **LaunchAgent değil
+LaunchDaemon** olarak kuruldu: LaunchAgent (`~/Library/LaunchAgents`) oturum
+açan kullanıcı olarak çalışır ve o kullanıcı Activity Monitor'den serbestçe
+kapatabilir; LaunchDaemon (`/Library/LaunchDaemons`) **root** olarak çalışır,
+kurulumu `sudo` gerektirir ve standart bir kullanıcı durduramaz. Bu, sunumun
+yapılacağı MacBook'ta agentın terminal kapatılınca durmaması ihtiyacını da
+karşılıyor.
+
 ### Hedef Bilgisayara Kurulum: `setup_agent.py`
 
 İzlenecek bir bilgisayara agent'ı kurmak için tek bir script yeterli:
