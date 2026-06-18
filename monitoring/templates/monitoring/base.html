@@ -397,6 +397,14 @@
         localStorage.setItem('dm-theme', next);
         document.getElementById('darkIcon').className = next === 'dark' ? 'bi bi-sun-fill' : 'bi bi-moon-stars-fill';
     });
+
+    // Açıklayıcı tooltip'ler — sunum sırasında "bu ne demek?" sorularına destek
+    // için title="..." data-bs-toggle="tooltip" eklenen her öğede otomatik çalışır.
+    document.addEventListener('DOMContentLoaded', function () {
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+            new bootstrap.Tooltip(el);
+        });
+    });
     </script>
     {% block extra_js %}{% endblock %}
 </body>

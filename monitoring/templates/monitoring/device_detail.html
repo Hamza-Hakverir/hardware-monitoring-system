@@ -29,6 +29,8 @@
         <p class="text-muted mb-0">
             <i class="bi bi-ethernet me-1"></i>{{ device.mac_address }} · {{ device.os_info }}
             {% if hardware.ip_address %} · <i class="bi bi-globe me-1"></i>{{ hardware.ip_address }}{% endif %}
+            <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+               title="Bu sayfadaki tüm değerler ilişkisel bir tablodan değil, cihazın tek satırlık JSONB özetinden (Device.live_metrics) okunur — her heartbeat'te satır eklenmez, bu hücre güncellenir."></i>
         </p>
         {% if device.tags.all %}
         <div class="d-flex flex-wrap gap-1 mt-1">
@@ -57,10 +59,12 @@
         <a href="{% url 'ui_device_tags' pk=device.mac_address %}" class="btn btn-sm btn-outline-secondary" title="Etiketleri Düzenle">
             <i class="bi bi-tags me-1"></i>Etiketler
         </a>
-        <a href="{% url 'ui_heartbeats_csv' pk=device.mac_address %}?limit=200" class="btn btn-sm btn-outline-secondary" title="Son 200 heartbeat CSV">
+        <a href="{% url 'ui_heartbeats_csv' pk=device.mac_address %}?limit=200" class="btn btn-sm btn-outline-secondary"
+           data-bs-toggle="tooltip" title="Dosya sistemi arşivinden (archive/&lt;mac&gt;/&lt;tarih&gt;.jsonl) son 200 kaydı CSV olarak indirir">
             <i class="bi bi-download me-1"></i>CSV
         </a>
-        <a href="{% url 'ui_device_archive_list' pk=device.mac_address %}" class="btn btn-sm btn-outline-secondary" title="Ham arşivdeki günleri listele (JSON)">
+        <a href="{% url 'ui_device_archive_list' pk=device.mac_address %}" class="btn btn-sm btn-outline-secondary"
+           data-bs-toggle="tooltip" title="Ham heartbeat geçmişinin tutulduğu dosya arşivinde mevcut günleri listeler — canlı özette sadece son 10 ölçüm tutulur, geçmişin tamamı buradadır">
             <i class="bi bi-archive me-1"></i>Arşiv
         </a>
     </div>
@@ -168,7 +172,11 @@
 <!-- ============================================================ -->
 <div class="card dm-card mb-4 dm-animate">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h6 class="mb-0 fw-bold"><i class="bi bi-graph-up me-2"></i>24 Saatlik Geçmiş Trend</h6>
+        <h6 class="mb-0 fw-bold">
+            <i class="bi bi-graph-up me-2"></i>24 Saatlik Geçmiş Trend
+            <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.75rem" data-bs-toggle="tooltip" data-bs-placement="top"
+               title="Gerçek kayan 24 saatlik pencere: saatlik bucket'larla sum/count O(1) güncellenir, 24 saatten eski bucket düşerken payı toplamdan çıkarılır (takvim günü sıfırlaması YOK — gece yarısında sıçrama olmaz)."></i>
+        </h6>
         <small class="text-muted" id="trendStatus">Yükleniyor...</small>
     </div>
     <div class="card-body" style="padding:.75rem"><canvas id="trendChart" height="80"></canvas></div>
@@ -180,14 +188,21 @@
 <div id="cpu" class="dm-section">
     <h5 class="dm-section-title"><i class="bi bi-cpu me-2"></i>CPU Detayları</h5>
     <div class="dm-info-grid mb-3">
-        <div class="dm-info-item"><div class="label">Sistem</div><div class="value" style="color:var(--dm-danger)">%{{ latest_hb.cpu_system|floatformat:1|default:"0" }}</div></div>
-        <div class="dm-info-item"><div class="label">Kullanıcı</div><div class="value" style="color:var(--dm-primary)">%{{ latest_hb.cpu_user|floatformat:1|default:"0" }}</div></div>
-        <div class="dm-info-item"><div class="label">Boş</div><div class="value" style="color:var(--dm-success)">%{{ latest_hb.cpu_idle|floatformat:1|default:"0" }}</div></div>
-        <div class="dm-info-item"><div class="label">Frekans</div><div class="value">{{ latest_hb.cpu_freq|floatformat:0|default:"0" }} MHz</div></div>
-        <div class="dm-info-item"><div class="label">İş Parçacığı</div><div class="value" style="color:#6f42c1">{{ latest_hb.thread_count|default:"0" }}</div></div>
-        <div class="dm-info-item"><div class="label">İşlem Sayısı</div><div class="value">{{ latest_hb.process_count|default:"0" }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="İşletim sisteminin çekirdek (kernel) işlemleri için harcadığı CPU yüzdesi. Yüksekse genellikle sürücü/donanım sorunu işaretidir.">
+            <div class="label">Sistem</div><div class="value" style="color:var(--dm-danger)">%{{ latest_hb.cpu_system|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Açık uygulamaların (tarayıcı, ofis vb.) harcadığı CPU yüzdesi.">
+            <div class="label">Kullanıcı</div><div class="value" style="color:var(--dm-primary)">%{{ latest_hb.cpu_user|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Kullanılmayan CPU kapasitesi. %0 ise işlemci tamamen dolu demektir.">
+            <div class="label">Boş</div><div class="value" style="color:var(--dm-success)">%{{ latest_hb.cpu_idle|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="İşlemcinin o an çalıştığı hız. Modern işlemciler yük altında hızlanır (Turbo Boost), boştayken yavaşlar.">
+            <div class="label">Frekans</div><div class="value">{{ latest_hb.cpu_freq|floatformat:0|default:"0" }} MHz</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="İşlemcinin aynı anda yürütebileceği görev sayısı (genelde çekirdek sayısının 2 katı).">
+            <div class="label">İş Parçacığı</div><div class="value" style="color:#6f42c1">{{ latest_hb.thread_count|default:"0" }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Sistemde o an çalışan toplam süreç (process) sayısı.">
+            <div class="label">İşlem Sayısı</div><div class="value">{{ latest_hb.process_count|default:"0" }}</div></div>
         {% if latest_hb.cpu_temperature %}
-        <div class="dm-info-item"><div class="label">Sıcaklık</div><div class="value" style="color:{% if latest_hb.cpu_temperature >= 80 %}var(--dm-danger){% elif latest_hb.cpu_temperature >= 60 %}var(--dm-warning){% else %}var(--dm-success){% endif %}">{{ latest_hb.cpu_temperature|floatformat:1 }}°C</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="İşlemcinin anlık ısısı. 80°C üstü tehlikeli bölge, 90°C+ thermal throttling (kendini yavaşlatma) başlar.">
+            <div class="label">Sıcaklık</div><div class="value" style="color:{% if latest_hb.cpu_temperature >= 80 %}var(--dm-danger){% elif latest_hb.cpu_temperature >= 60 %}var(--dm-warning){% else %}var(--dm-success){% endif %}">{{ latest_hb.cpu_temperature|floatformat:1 }}°C</div></div>
         {% endif %}
     </div>
     <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-activity me-2"></i>CPU Yükü</h6></div>
@@ -221,12 +236,18 @@
     <div class="row g-3 mb-3">
         <div class="col-md-7">
             <div class="dm-info-grid">
-                <div class="dm-info-item"><div class="label">Fiziksel Bellek</div><div class="value">{{ latest_hb.memory_total|default:0|filesizeformat }}</div></div>
-                <div class="dm-info-item"><div class="label">Kullanılan</div><div class="value" style="color:var(--dm-danger)">{{ latest_hb.memory_used|default:0|filesizeformat }}</div></div>
-                <div class="dm-info-item"><div class="label">Kullanılabilir</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.memory_available|default:0|filesizeformat }}</div></div>
-                <div class="dm-info-item"><div class="label">Önbellek</div><div class="value" style="color:var(--dm-info)">{{ latest_hb.memory_cached|default:0|filesizeformat }}</div></div>
-                <div class="dm-info-item"><div class="label">Takas Toplam</div><div class="value">{{ latest_hb.swap_total|default:0|filesizeformat }}</div></div>
-                <div class="dm-info-item"><div class="label">Takas Kullanılan</div><div class="value" style="color:var(--dm-warning)">{{ latest_hb.swap_used|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item" data-bs-toggle="tooltip" title="Bilgisayara takılı toplam RAM miktarı.">
+                    <div class="label">Fiziksel Bellek</div><div class="value">{{ latest_hb.memory_total|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item" data-bs-toggle="tooltip" title="Şu an programların aktif olarak kullandığı RAM.">
+                    <div class="label">Kullanılan</div><div class="value" style="color:var(--dm-danger)">{{ latest_hb.memory_used|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item" data-bs-toggle="tooltip" title="Yeni bir program açılırsa hemen kullanılabilecek boş alan.">
+                    <div class="label">Kullanılabilir</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.memory_available|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item" data-bs-toggle="tooltip" title="İşletim sisteminin disk erişimini hızlandırmak için ayırdığı RAM. Gerekirse anında boşaltılır, sorun değildir.">
+                    <div class="label">Önbellek</div><div class="value" style="color:var(--dm-info)">{{ latest_hb.memory_cached|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item" data-bs-toggle="tooltip" title="Sabit diskin RAM gibi kullanılan alanı. RAM dolunca işletim sistemi bazı verileri buraya taşır.">
+                    <div class="label">Takas Toplam</div><div class="value">{{ latest_hb.swap_total|default:0|filesizeformat }}</div></div>
+                <div class="dm-info-item" data-bs-toggle="tooltip" title="Şu an diske taşınmış veri miktarı. Yüksekse RAM yetersiz demektir — disk çok daha yavaş olduğu için sistemi yavaşlatır.">
+                    <div class="label">Takas Kullanılan</div><div class="value" style="color:var(--dm-warning)">{{ latest_hb.swap_used|default:0|filesizeformat }}</div></div>
             </div>
         </div>
         <div class="col-md-5">
@@ -244,16 +265,23 @@
 <div id="disk" class="dm-section">
     <h5 class="dm-section-title"><i class="bi bi-hdd me-2"></i>Disk Detayları</h5>
     <div class="dm-info-grid mb-3">
-        <div class="dm-info-item"><div class="label">Disk Kullanımı</div><div class="value" style="color:var(--dm-warning)">%{{ latest_hb.disk_percent|floatformat:1|default:"0" }}</div></div>
-        <div class="dm-info-item"><div class="label">Toplam Okunan</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.disk_read_bytes|default:0|filesizeformat }}</div></div>
-        <div class="dm-info-item"><div class="label">Toplam Yazılan</div><div class="value" style="color:var(--dm-primary)">{{ latest_hb.disk_write_bytes|default:0|filesizeformat }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Sabit diskin ne kadar dolu olduğu. %90 üstü kritik kabul edilir.">
+            <div class="label">Disk Kullanımı</div><div class="value" style="color:var(--dm-warning)">%{{ latest_hb.disk_percent|floatformat:1|default:"0" }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Sistem açılışından bu yana diskten okunmuş toplam veri (kümülatif, bir hız değil).">
+            <div class="label">Toplam Okunan</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.disk_read_bytes|default:0|filesizeformat }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Sistem açılışından bu yana diske yazılmış toplam veri (kümülatif).">
+            <div class="label">Toplam Yazılan</div><div class="value" style="color:var(--dm-primary)">{{ latest_hb.disk_write_bytes|default:0|filesizeformat }}</div></div>
     </div>
     <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Disk Giriş/Çıkış</h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="diskChart" height="90"></canvas></div></div>
 
     {% if latest_hb.disk_partitions %}
     <div class="card dm-card mt-3">
-        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-hdd-stack me-2"></i>Disk Bölümleri</h6></div>
+        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem">
+            <i class="bi bi-hdd-stack me-2"></i>Disk Bölümleri
+            <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.75rem" data-bs-toggle="tooltip"
+               title="Diskin mantıksal olarak ayrıldığı bölümler (Windows: C:, D:… · macOS/Linux: /, /home…). Her bölümün doluluk oranı ayrı gösterilir."></i>
+        </h6></div>
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table dm-table table-hover align-middle mb-0" style="font-size:.8rem">
@@ -299,17 +327,25 @@
 <div id="ag" class="dm-section">
     <h5 class="dm-section-title"><i class="bi bi-wifi me-2"></i>Ağ Detayları</h5>
     <div class="dm-info-grid mb-3">
-        <div class="dm-info-item"><div class="label">Alınan Veri</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.net_bytes_recv|default:0|filesizeformat }}</div></div>
-        <div class="dm-info-item"><div class="label">Gönderilen Veri</div><div class="value" style="color:var(--dm-primary)">{{ latest_hb.net_bytes_sent|default:0|filesizeformat }}</div></div>
-        <div class="dm-info-item"><div class="label">Gelen Paket</div><div class="value">{{ latest_hb.net_packets_recv|default:0 }}</div></div>
-        <div class="dm-info-item"><div class="label">Giden Paket</div><div class="value">{{ latest_hb.net_packets_sent|default:0 }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Sistem açılışından bu yana ağdan indirilen toplam veri (kümülatif).">
+            <div class="label">Alınan Veri</div><div class="value" style="color:var(--dm-success)">{{ latest_hb.net_bytes_recv|default:0|filesizeformat }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Sistem açılışından bu yana ağa yüklenen toplam veri (kümülatif).">
+            <div class="label">Gönderilen Veri</div><div class="value" style="color:var(--dm-primary)">{{ latest_hb.net_bytes_sent|default:0|filesizeformat }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Ağdan alınan paket sayısı — veri küçük parçalara (paket) bölünerek iletilir.">
+            <div class="label">Gelen Paket</div><div class="value">{{ latest_hb.net_packets_recv|default:0 }}</div></div>
+        <div class="dm-info-item" data-bs-toggle="tooltip" title="Ağa gönderilen paket sayısı.">
+            <div class="label">Giden Paket</div><div class="value">{{ latest_hb.net_packets_sent|default:0 }}</div></div>
     </div>
     <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Ağ Giriş/Çıkış</h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="netChart" height="90"></canvas></div></div>
 
     {% if latest_hb.net_per_nic %}
     <div class="card dm-card mt-3">
-        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-diagram-3 me-2"></i>Arayüz Bazında İstatistikler</h6></div>
+        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem">
+            <i class="bi bi-diagram-3 me-2"></i>Arayüz Bazında İstatistikler
+            <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.75rem" data-bs-toggle="tooltip"
+               title="NIC = Network Interface Card. Bilgisayardaki her ağ bağlantısının (Wi-Fi, Ethernet…) trafiği ayrı ayrı gösterilir."></i>
+        </h6></div>
         <div class="card-body p-0">
             <div class="table-responsive">
                 <table class="table dm-table table-hover align-middle mb-0" style="font-size:.8rem">
@@ -342,7 +378,11 @@
 <!-- BÖLÜM 6: TOP İŞLEMLER -->
 <!-- ============================================================ -->
 <div class="dm-section">
-    <h5 class="dm-section-title"><i class="bi bi-list-task me-2"></i>En Çok Kaynak Kullanan İşlemler</h5>
+    <h5 class="dm-section-title">
+        <i class="bi bi-list-task me-2"></i>En Çok Kaynak Kullanan İşlemler
+        <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.7rem" data-bs-toggle="tooltip"
+           title="Bilgisayarda çalışan tüm programlar CPU kullanımına göre sıralanır, en üstteki 10 tanesi her heartbeat'te gönderilir."></i>
+    </h5>
     <div class="card dm-card">
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -377,7 +417,11 @@
 <!-- BÖLÜM 7: ONLINE/OFFLINE ZEman ÇİZELGESİ -->
 <!-- ============================================================ -->
 <div id="timeline" class="dm-section">
-    <h5 class="dm-section-title"><i class="bi bi-calendar3 me-2"></i>Son 7 Gün — Online/Offline Zaman Çizelgesi</h5>
+    <h5 class="dm-section-title">
+        <i class="bi bi-calendar3 me-2"></i>Son 7 Gün — Online/Offline Zaman Çizelgesi
+        <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.7rem" data-bs-toggle="tooltip"
+           title="Her satır bir günü temsil eder, 24 saate bölünmüştür. Yeşil: cihaz açık ve veri gönderiyordu. Kırmızı: kapalıydı/agent çalışmıyordu. Gri: cihaz henüz kayıtlı değildi."></i>
+    </h5>
     <div class="card dm-card">
         <div class="card-body">
             <div id="timelineContainer">
@@ -639,7 +683,7 @@ fetch(`/api/monitoring/devices/${encodeURIComponent(MAC)}/hourly/`).then(r=>r.js
     const hours = data.hours || [];
     const el = document.getElementById('trendStatus');
     if(!hours.length){
-        el.textContent = 'Henüz yeterli veri yok (ilk temizlik sonrası görünür)';
+        el.textContent = 'Henüz yeterli veri yok (ilk heartbeat ile birlikte oluşmaya başlar)';
         return;
     }
     el.textContent = `Son ${hours.length} saat`;

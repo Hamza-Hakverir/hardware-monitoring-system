@@ -12,7 +12,11 @@
 <div class="dm-page-header d-flex justify-content-between align-items-center">
     <div>
         <h2 class="mb-1"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
-        <p class="text-muted mb-0"><span class="dm-live-dot me-1"></span> Sistem durumu anlık olarak izlenmektedir</p>
+        <p class="text-muted mb-0">
+            <span class="dm-live-dot me-1"></span> Sistem durumu anlık olarak izlenmektedir
+            <i class="bi bi-info-circle ms-1" style="cursor:help" data-bs-toggle="tooltip" data-bs-placement="bottom"
+               title="Heartbeat'ler ilişkisel tabloya satır olarak eklenmez — her cihaz tek satırda (Device.live_metrics JSONB) tutulur, ham geçmiş ise dosya sistemi arşivinde."></i>
+        </p>
     </div>
 </div>
 
@@ -28,7 +32,8 @@
         </div>
     </div>
     <div class="col-md-3 dm-animate dm-animate-delay-2">
-        <div class="card dm-stat-card bg-gradient-success h-100">
+        <div class="card dm-stat-card bg-gradient-success h-100" data-bs-toggle="tooltip"
+             title="Son 2 dakika içinde heartbeat göndermiş cihazlar.">
             <div class="card-body">
                 <i class="bi bi-check-circle stat-icon"></i>
                 <div class="stat-value" id="valActive">{{ active_devices }}</div>
@@ -37,7 +42,8 @@
         </div>
     </div>
     <div class="col-md-3 dm-animate dm-animate-delay-3">
-        <div class="card dm-stat-card bg-gradient-danger h-100">
+        <div class="card dm-stat-card bg-gradient-danger h-100" data-bs-toggle="tooltip"
+             title="Son 2 dakikadır sinyal göndermemiş cihazlar — sunucu 30sn'de bir kontrol edip otomatik 'Pasif' işaretler.">
             <div class="card-body">
                 <i class="bi bi-x-circle stat-icon"></i>
                 <div class="stat-value" id="valInactive">{{ inactive_devices }}</div>
@@ -84,7 +90,11 @@
 {% if devices_heatmap %}
 <div class="card dm-card dm-animate dm-animate-delay-4 mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
-        <h6><i class="bi bi-grid-3x3-gap me-2"></i>CPU Yük Haritası</h6>
+        <h6>
+            <i class="bi bi-grid-3x3-gap me-2"></i>CPU Yük Haritası
+            <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.75rem" data-bs-toggle="tooltip"
+               title="Her kutu bir cihazın live_metrics özetindeki SON ölçümü gösterir — ek bir sorgu yapılmaz, Device satırıyla birlikte zaten gelmiştir."></i>
+        </h6>
         <div class="d-flex gap-2 align-items-center" style="font-size:.72rem;color:var(--dm-text-muted)">
             <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px"></span> &lt;50%</span>
             <span><span style="display:inline-block;width:10px;height:10px;background:#eab308;border-radius:2px"></span> 50–75%</span>
