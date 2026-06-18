@@ -15,6 +15,12 @@ media/
 staticfiles/
 collected_static/
 
+# DevMonitor — ham heartbeat arşivi (üretim verisi, kaynak kod değil)
+archive/
+
+# DevMonitor — setup_agent.py'nin yazdığı, özel sunucu adresi içeren dosya
+service_args.txt
+
 # Environment variables (kimlik bilgileri buraya tasınmalı)
 .env
 .env.*

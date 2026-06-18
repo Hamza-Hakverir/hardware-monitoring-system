@@ -113,21 +113,26 @@ psutil kütüphanesi çağrılır
 
 ---
 
-## 5. Veritabanı Tasarımı (9 Tablo)
+## 5. Veritabanı Tasarımı (7 Tablo + 1 JSONB Özet Hücresi)
 
 ```
 Device (Cihaz) — MAC adresi birincil anahtar
+  │   └── live_metrics (JSONB)  → CANLI ÖZET: son 10 ölçüm + 24 saatlik kayan ortalama
+  │                                 (bkz. Bölüm 8 — Mimari Kararlar)
   │
   ├── HardwareSpec [1'e 1]   → İşlemci, RAM, ekran kartı, IP, bilgisayar adı
   ├── Location [1'e 1]       → Bina, Kat, Oda
   ├── DeviceThreshold [1'e 1]→ Cihaza özel uyarı eşikleri
   ├── Tag [Çoka çok]         → Renkli etiketler
   │
-  ├── HeartbeatLog [1'e çok] → Her 15 sn'deki anlık ölçümler
   ├── Alert [1'e çok]        → Oluşan sistem uyarıları
-  ├── DeviceStatusLog [1'e çok] → Online/Offline geçiş kayıtları
-  └── HourlyAggregate [1'e çok] → Saatlik ortalama/maksimum değerler
+  └── DeviceStatusLog [1'e çok] → Online/Offline geçiş kayıtları
 ```
+
+> **Not:** Önceki sürümde her heartbeat ayrı bir satır olarak `HeartbeatLog`
+> tablosuna ekleniyor, saatlik özetler de ayrı bir `HourlyAggregate` tablosunda
+> tutuluyordu. Hocamızın geri bildirimi üzerine bu iki tablo tamamen kaldırıldı —
+> bkz. Bölüm 8.
 
 ---
 
@@ -273,19 +278,143 @@ Sunucu her 30 saniyede bir kontrol eder: Son 2 dakikada hiç sinyal göndermeyen
 
 Ekip çalışmasını kolaylaştırmak için. Her iki geliştiricinin de aynı veritabanına erişebilmesi, farklı bilgisayarlardan test yapılabilmesi.
 
-### Veri Saklama Stratejisi
+### Hocanın Geri Bildirimi: "İlişkisel Veritabanı Şişmesi" Sorunu
 
-- **Anlık veri:** Cihaz başına maksimum 1440 kayıt tutulur (= 6 saatlik veri, her 15 saniyede bir kayıt).
-- **Saatlik özet:** Her ~25 saatte bir arka planda çalışan bir görev (thread) eski kayıtları saatlik ortalamalara çevirir ve `HourlyAggregate` tablosuna yazar. Bu özetler 30 gün saklanır.
-- **Amaç:** Veritabanının dolmaması ve uzun vadeli trend analizine olanak tanıması.
+İlk sürümde her heartbeat (15 saniyede bir) `HeartbeatLog` tablosuna **yeni bir
+satır** olarak ekleniyordu. Hocamız bunun binlerce cihazlı bir ortamda
+veritabanını kısa sürede kilitleyeceğini belirtti ve mimariyi iki parçaya
+ayırmamızı istedi: **canlı özet** (ilişkisel DB) + **ham arşiv** (ilişkisel
+olmayan depolama). Aşağıdaki bölümler bu geri bildirim üzerine yapılan
+değişiklikleri açıklar.
+
+### Yeni Veri Saklama Stratejisi: Özet Tablo + JSONB
+
+`HeartbeatLog` ve `HourlyAggregate` tabloları kaldırıldı. Artık her cihaz,
+`Device` tablosunda **tek bir satırla** temsil ediliyor; bu satırın
+`live_metrics` sütunu PostgreSQL'in **JSONB** tipinde tutuluyor:
+
+```json
+{
+  "recent": [ {"...tam heartbeat verisi...", "timestamp": "..."} ],   // en fazla 10
+  "windows": {
+    "cpu_percent":  {"sum": 812.4, "count": 34, "buckets": [{"hour": "...", "sum": 41.2, "count": 4, "max": 55.0}, ...]},
+    "ram_percent":  { "...": "..." },
+    "disk_percent": { "...": "..." }
+  }
+}
+```
+
+Yeni bir heartbeat geldiğinde **satır eklenmez (INSERT yok)** — `recent`
+listesinin en eski elemanı silinip dizi bir yana kaydırılır (shift), yeni veri
+sona eklenir; hücre **UPDATE** edilir.
+
+### Geçmiş Verinin Arşivlenmesi (Dosya Sistemi)
+
+Geçmişe dönük ham loglar artık ilişkisel veritabanında değil, dosya sisteminde
+tutuluyor: `archive/<mac-adresi>/<YYYY-MM-DD>.jsonl`. Her satır bir heartbeat'i
+temsil eden bir JSON nesnesidir. Bu dosyalar sadece CSV dışa aktarımda veya
+geçmiş inceleme yapılırken okunur — canlı dashboard hiçbir zaman bu dosyalara
+dokunmaz. (Alternatif olarak MongoDB gibi ilişkisel olmayan bir veritabanı da
+kullanılabilirdi; bu projede kurulum basitliği için dosya sistemi seçildi.)
+
+### 24 Saatlik Ortalama Matematiği: Kayan Pencere (Sliding Window)
+
+Hocamızın bıraktığı görev, "24 saatlik süre dolup yeni güne geçildiğinde veya
+hareketli ortalamadan eski veriler çıkarılırken bu matematiğin nasıl
+çalışacağı" idi. Çözümümüz **saat granülerlikli sabit-boyutlu bir döngüsel
+arabellek (circular buffer)** kullanmak:
+
+```
+Her metrik (CPU/RAM/Disk) için saatlik "bucket"lar tutulur: {saat, sum, count, max}
+
+Yeni değer v geldiğinde (O(1)):
+    bucket.sum   += v ;  bucket.count   += 1     (v'nin ait olduğu saate)
+    window.sum   += v ;  window.count   += 1     (24 saatlik toplam)
+
+Bir bucket 24 saatlik pencereden çıkarken (yeni saate geçişte):
+    window.sum   -= evicted.sum
+    window.count -= evicted.count
+
+Ortalama = window.sum / window.count   (her zaman — DB'deki tüm satırları
+                                         yeniden toplamadan)
+```
+
+Bu yaklaşımın **takvim günü sıfırlaması yoktur** — pencere her zaman "şu anki
+zamandan 24 saat öncesine kadar" kayar. Bu sayede gece yarısı sınırında
+ortalama aniden sıfırlanıp zıplamaz; istatistikte buna **sliding window
+aggregation** (kayan pencere toplulaştırması) denir ve okulda gördüğümüz
+hareketli ortalama (moving average) konusunun, sabit bellek kullanan/O(1)
+güncellenen bir versiyonudur. Matematiğin doğruluğu `monitoring/tests.py`
+içindeki testlerle (200 saatlik simülasyon dahil, toplam sum/count'ın hiçbir
+zaman bucket içeriğinden sapmadığını doğrulayan testler) kanıtlanmıştır.
 
 ### Önbellek (Cache)
 
 Dashboard özet verileri (toplam cihaz, aktif cihaz, uyarı sayısı) 30 saniye boyunca bellekte tutulur. Her kullanıcı sayfayı yenilediğinde veritabanına sorgu atmak yerine önbellekten hızlıca döndürülür.
 
-### Arka Plan İşlemi (Thread)
+### Agent Çökme Koruması ve Yetki Kısıtlaması (Client Guard)
 
-Saatlik ortalama hesaplama işlemi bir arka plan iş parçacığında (thread) çalışır. Bu sayede kullanıcı arayüzü bu hesaplama sırasında yavaşlamaz.
+Hocamızın bir diğer talebi, `agent.py`'nin çökmesine karşı işletim sistemi
+seviyesinde koruma ve amatör kullanıcıların onu Görev Yöneticisi'nden
+kapatmasını engelleyecek yetki sınırlandırmasıydı. `install_service.py`,
+agent.py'yi bir **Windows Servisi** olarak çalıştırarak bunu iki katmanda
+sağlıyor:
+
+1. **Süreç seviyesi:** Servis içindeki Python döngüsü, agent.py alt süreci
+   çökerse 5 saniye içinde otomatik yeniden başlatır.
+2. **Servis seviyesi (`python install_service.py secure`):**
+   - `sc failure` komutu ile Windows Servis Kontrol Yöneticisi'ne (SCM), servisin
+     kendisi (host süreç) çökse bile otomatik yeniden başlatma talimatı verilir
+     — Python döngüsünün üstüne eklenen ikinci bir koruma katmanı.
+   - `sc sdset` komutu ile servisin güvenlik tanımlayıcısı (ACL) değiştirilir:
+     Start/Stop/Delete yetkisi sadece **Administrators** ve **SYSTEM**'e
+     açıktır. Standart/amatör bir kullanıcı Görev Yöneticisi, `services.msc`
+     veya `sc stop` ile servisi durduramaz ("Access is denied" hatası alır).
+
+**Linux tarafı (`devmonitor.service`):** `Restart=always` (her türlü beklenmedik
+çıkışta yeniden başlatma), `OOMScoreAdjust=-1000` (bellek darlığında OOM killer
+bu süreci hedef almaz), `ProtectSystem=strict`/`ProtectHome=read-only`/
+`NoNewPrivileges=true` (hafif sandbox — agent.py disk'e yazmadığı için güvenli).
+Ekibimizin ilk taslağında önerilen `KillMode=none` **kasıtlı olarak
+kullanılmadı** — bu ayar modern systemd'de orphan (sahipsiz) süreçler
+bırakabildiği için resmi olarak önerilmiyor. "Amatör kullanıcı durduramasın"
+gereksinimi Linux'ta ek bir ayar gerektirmeden zaten sağlanıyor: bu bir sistem
+geneli (system-wide) unit olduğu için `systemctl stop devmonitor` zaten
+root/sudo veya polkit yetkisi ister.
+
+### Hedef Bilgisayara Kurulum: `setup_agent.py`
+
+İzlenecek bir bilgisayara agent'ı kurmak için tek bir script yeterli:
+
+```bash
+python setup_agent.py
+```
+
+Script agent'ın bağımlılıklarını (`psutil`, `requests` — Django/DRF gibi sunucu
+bağımlılıkları DEĞİL) kurar, sunucu adresini sorar ve platforma göre otomatik
+olarak Windows Servisi (`install_service.py install` + `secure` + `start`) veya
+Linux systemd unit'ini (root yetkisiyle `/etc/systemd/system/devmonitor.service`)
+kurup başlatır. PyInstaller ile `.exe` paketleme değerlendirildi ancak bu
+oturumda uygulanmadı — `setup_agent.py` script'i kurulum gereksinimini zaten
+karşıladığı ve PyInstaller'ın her platformda gerçek bir makinede inşa edilip
+test edilmesi gerektiği için şimdilik kapsam dışı bırakıldı.
+
+### Ham Veri Arşivine Erişim API'si
+
+Sadece CSV export değil, dosya sistemi arşivindeki ham günlük dosyalarına da
+API üzerinden erişilebiliyor:
+
+| Method | URL | Açıklama |
+|---|---|---|
+| GET | `ui/devices/<mac>/archive/` | Cihaza ait arşivlenmiş günleri (tarih + dosya boyutu) listeler |
+| GET | `ui/devices/<mac>/archive/<YYYY-MM-DD>/download/` | Belirli bir günün ham `.jsonl` dosyasını indirir |
+
+Bu endpoint'leri eklerken `archive.py`'de gerçek bir **path traversal**
+güvenlik açığı bulundu ve düzeltildi: `mac_address`, `register_device`
+endpoint'inden serbest metin olarak geldiği için (`"../../etc"` gibi) kötü
+niyetli bir değer dosya sistemi yolunu kaçırabilirdi. Düzeltme: dizin adı
+üretirken alfanümerik ve `-` dışındaki her karakter `_` ile değiştiriliyor;
+`day` parametresi de sıkı bir tarih regex'iyle (`fullmatch`) doğrulanıyor.
 
 ---
 
@@ -339,8 +468,11 @@ Yapışık (sticky) bölüm menüsü ile 6 ana bölüme hızlı geçiş:
 | `cpu_percent()` ilk çağrıda 0 dönüyordu | `cpu_times_percent(interval=1)` ile 1 saniyelik ölçüm; `100 - boş` formulü |
 | Grafik verisi ters sıradaydı | `device_stats` endpoint'i veriyi kronolojik sırayla döndürecek şekilde düzeltildi |
 | Online/Offline çizelgesi zıt renk gösteriyordu | Başlangıç durumu `went_online_at` referansıyla geriye doğru zincir hesaplamasıyla düzeltildi |
-| Veritabanı hızla doluyordu | 1440 kayıt limiti + saatlik özetleme sistemi |
-| Admin panelinde 4 model görünmüyordu | `Tag`, `DeviceThreshold`, `DeviceStatusLog`, `HourlyAggregate` admin.py'e eklendi |
+| Veritabanı satır satır insert ile şişiyordu (hoca geri bildirimi) | `HeartbeatLog`/`HourlyAggregate` tabloları kaldırıldı; `Device.live_metrics` (JSONB) ile tek-satır özet + dosya sistemi arşivine geçildi (bkz. Bölüm 8) |
+| Postgres'te `SELECT ... FOR UPDATE`, nullable OneToOne (`threshold`) JOIN'inde hata veriyordu | `select_for_update(of=('self',))` ile kilit sadece `Device` tablosuna uygulandı |
+| Admin panelinde 4 model görünmüyordu | `Tag`, `DeviceThreshold`, `DeviceStatusLog` admin.py'e eklendi |
+| `install_service.py`'deki `_sc()` Türkçe Windows konsolunda `sc.exe` çıktısını decode ederken çöküyordu (`secure` komutunu da kırıyordu) | `subprocess.run(..., errors='replace')` + yazdırma sırasında ASCII fallback eklendi |
+| Arşiv listeleme/indirme API'si eklenirken `mac_address`'in serbest metin olması path traversal riski oluşturuyordu | `archive._safe_mac` alfanümerik+`-` dışındaki her karakteri `_`'ye çeviriyor; `day` parametresi sıkı regex `fullmatch` ile doğrulanıyor |
 
 ---
 
@@ -348,15 +480,16 @@ Yapışık (sticky) bölüm menüsü ile 6 ana bölüme hızlı geçiş:
 
 | Metrik | Değer |
 |---|---|
-| Veritabanı tablosu (model) | 9 |
+| Veritabanı tablosu (model) | 7 (+ `Device.live_metrics` JSONB özet hücresi) |
 | API uç noktası (endpoint) | 20 |
 | Web arayüzü sayfası | 9 |
 | Heartbeat'teki ölçüm sayısı | 40+ alan |
 | Heartbeat aralığı | 15 saniye |
-| Cihaz başına anlık veri saklama | 6 saat (1440 kayıt) |
-| Saatlik özet saklama süresi | 30 gün |
-| Veritabanı bileşik indeks sayısı | 6 |
-| Toplam Python kodu (yaklaşık) | ~1800 satır |
+| Canlı özette tutulan son ölçüm sayısı | 10 (cihaz başına, `live_metrics.recent`) |
+| Kayan ortalama penceresi | 24 saat (saatlik bucket, O(1) güncelleme) |
+| Ham geçmiş depolama | Dosya sistemi (`archive/<mac>/<tarih>.jsonl`) — sınırsız, sadece gerektiğinde okunur |
+| Veritabanı bileşik indeks sayısı | 4 |
+| Mimari değişikliğe ait birim test sayısı | 19 (`monitoring/tests.py`) |
 
 ---
 
@@ -368,6 +501,14 @@ python baslat.py
 
 # Windows
 CALISTIR.bat dosyasına çift tıkla
+
+# Windows Servisi olarak (çökme koruması + yetki kısıtlaması ile, bkz. Bölüm 8)
+python install_service.py install
+python install_service.py secure
+python install_service.py start
+
+# İzlenecek hedef bilgisayara kurulum (Windows/Linux otomatik, bkz. Bölüm 8)
+python setup_agent.py
 ```
 
 | Sayfa | Adres |

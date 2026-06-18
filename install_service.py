@@ -5,6 +5,7 @@ Gereksinim: pip install pywin32
 
 Kullanım (Yönetici olarak çalıştır):
     python install_service.py install   — servisi yükle
+    python install_service.py secure    — kurtarma aksiyonları + ACL kısıtlaması (install'dan sonra çalıştırın)
     python install_service.py start     — servisi başlat
     python install_service.py stop      — servisi durdur
     python install_service.py restart   — servisi yeniden başlat
@@ -22,10 +23,32 @@ SERVICE_NAME    = "DevMonitorAgent"
 SERVICE_DISPLAY = "DevMonitor Donanım İzleme Ajanı"
 SERVICE_DESC    = "Cihaz metriklerini (CPU, RAM, Disk, Ağ) periyodik olarak DevMonitor sunucusuna gönderir."
 
+# Servis kontrol ACL'i (bkz. cmd_secure): Administrators (BA) ve SYSTEM (SY) tam
+# yetkili (start/stop/delete); Authenticated Users (AU) ve Power Users (PU) sadece
+# sorgulayabilir (CC=QueryConfig LC=QueryStatus SW=EnumDependents LO=Interrogate
+# CR=UserDefinedControl RC=ReadControl) — RP(start)/WP(stop)/SD(delete) YOK.
+# Amaç: amatör/standart bir kullanıcı Görev Yöneticisi veya 'sc stop' ile servisi
+# durduramasın ("Access is denied").
+SERVICE_SDDL = (
+    "D:(A;;CCLCSWLOCRRC;;;AU)(A;;CCLCSWLOCRRC;;;PU)"
+    "(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)"
+)
+
 # Agent ve Python yolunu otomatik bul
 THIS_DIR   = os.path.dirname(os.path.abspath(__file__))
 AGENT_PATH = os.path.join(THIS_DIR, "agent.py")
 PYTHON_EXE = sys.executable  # Bu scripti çalıştıran Python
+
+# setup_agent.py farklı bir sunucu adresi seçildiğinde buraya "--server ..." gibi
+# ekstra agent.py argümanları yazar; dosya yoksa agent.py varsayılanı kullanılır.
+SERVICE_ARGS_FILE = os.path.join(THIS_DIR, "service_args.txt")
+
+
+def _read_service_args():
+    if os.path.exists(SERVICE_ARGS_FILE):
+        with open(SERVICE_ARGS_FILE, encoding="utf-8") as f:
+            return f.read().split()
+    return []
 
 
 # ============================================================
@@ -73,7 +96,7 @@ if HAS_PYWIN32:
             self._run()
 
         def _run(self):
-            cmd = [PYTHON_EXE, AGENT_PATH]
+            cmd = [PYTHON_EXE, AGENT_PATH] + _read_service_args()
             while True:
                 self._process = subprocess.Popen(
                     cmd,
@@ -102,17 +125,44 @@ if HAS_PYWIN32:
 # ============================================================
 
 def _sc(args):
-    """sc.exe veya net.exe komutunu çalıştır ve çıktıyı yazdır."""
-    result = subprocess.run(args, capture_output=True, text=True)
-    out = (result.stdout + result.stderr).strip()
+    """sc.exe veya net.exe komutunu çalıştır ve çıktıyı yazdır.
+    errors='replace': sc.exe çıktısı konsolun OEM kod sayfasını (örn. Türkçe
+    Windows'ta cp850/cp437) kullanabilir, bu Python'ın varsayılan metin kod
+    sayfasından (örn. cp1254) farklı olduğunda decode hatasıyla çökmesin.
+    """
+    result = subprocess.run(args, capture_output=True, text=True, errors='replace')
+    out = ((result.stdout or '') + (result.stderr or '')).strip()
     if out:
-        print(out)
+        try:
+            print(out)
+        except UnicodeEncodeError:
+            # Konsolun kod sayfası bazı karakterleri yazdıramıyor — sessizce
+            # ASCII'ye düşürerek en azından çökmeden bilgi ver.
+            print(out.encode('ascii', errors='replace').decode('ascii'))
     return result.returncode
 
 
 def cmd_status():
     print(f"\n[Servis: {SERVICE_NAME}]")
     _sc(["sc", "query", SERVICE_NAME])
+
+
+def cmd_secure():
+    """Servisi sertleştirir (Yönetici olarak çalıştırılmalı, 'install'dan sonra):
+    1) SCM seviyesinde otomatik kurtarma — servis host süreci (pythonservice.exe)
+       beklenmedik şekilde çökse bile SCM onu otomatik yeniden başlatır. Bu,
+       SvcDoRun içindeki Python restart döngüsünün (sadece agent.py alt sürecini
+       izler) ÜSTÜNE eklenen ikinci bir koruma katmanıdır.
+    2) Servis kontrol ACL'i (SERVICE_SDDL) — Start/Stop/Delete sadece
+       Administrators/SYSTEM'e açık.
+    """
+    print(f"[SECURE] {SERVICE_NAME} için kurtarma aksiyonları ayarlanıyor...")
+    _sc(["sc", "failure", SERVICE_NAME, "reset=", "86400",
+         "actions=", "restart/5000/restart/30000//1"])
+    print(f"[SECURE] {SERVICE_NAME} için kontrol yetkileri kısıtlanıyor "
+          f"(yalnızca Administrators/SYSTEM başlatabilir/durdurabilir)...")
+    _sc(["sc", "sdset", SERVICE_NAME, SERVICE_SDDL])
+    print("[SECURE] Tamamlandı. Doğrulamak için: sc sdshow", SERVICE_NAME)
 
 
 def cmd_debug():
@@ -141,6 +191,10 @@ def main():
 
     if action == "status":
         cmd_status()
+        return
+
+    if action == "secure":
+        cmd_secure()
         return
 
     if not HAS_PYWIN32:

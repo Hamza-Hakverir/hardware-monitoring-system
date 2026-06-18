@@ -1,11 +1,11 @@
 import csv
 import time as _time
-import threading
 from datetime import timedelta
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse, FileResponse, Http404
 from django.shortcuts import render, redirect, get_object_or_404
 from django.utils import timezone
-from django.db.models import Avg, Max, Subquery, OuterRef, FloatField, F
+from django.db import transaction
+from django.db.models import F
 from django.conf import settings
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
@@ -16,13 +16,14 @@ logger = logging.getLogger('monitoring')
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
+from . import archive, live_stats
 from .models import (
-    Device, Location, HardwareSpec, HeartbeatLog, Alert, HourlyAggregate,
+    Device, Location, HardwareSpec, Alert,
     DeviceThreshold, DeviceStatusLog, Tag,
 )
 from .serializers import (
     DeviceSerializer, LocationSerializer, HardwareSpecSerializer,
-    HeartbeatLogSerializer, HeartbeatChartSerializer, AlertSerializer,
+    HeartbeatPayloadSerializer, AlertSerializer,
     DeviceDetailSerializer, DashboardStatsSerializer
 )
 
@@ -78,8 +79,6 @@ def _send_critical_alert_email(alert):
 # YARDIMCI FONKSİYON — Eski cihazları otomatik pasifleştir
 # ============================================================
 STALE_THRESHOLD_MINUTES = 2  # 2 dakika sinyal gelmezse → pasif
-HEARTBEAT_LIMIT = 1440       # Cihaz başına max kayıt (15sn × 1440 = 6 saat)
-CLEANUP_EVERY = 96           # Her 96 yeni kayıtta bir temizlik yap (≈24 dakika)
 _STALE_CHECK_INTERVAL = 30.0 # Pasifleştirme kontrolü en fazla 30sn'de bir çalışır
 _last_stale_check: float = 0.0
 
@@ -109,55 +108,15 @@ def mark_stale_devices_inactive():
         logger.debug('mark_stale: aktif cihaz yok, değişiklik yapılmadı')
 
 
-def aggregate_completed_hours(device):
-    """Son 25 saatin tamamlanmış saatlerini HourlyAggregate'e yazar (upsert).
-    Temizlik sırasında çağrılır — tamamlanmamış mevcut saat dahil edilmez.
+def _attach_latest_metrics(devices):
+    """Her Device'a live_metrics['recent'] son elemanından latest_cpu/latest_ram ekler.
+    Alan zaten Device satırıyla birlikte gelmiş olduğu için ek SQL sorgusu gerekmez.
     """
-    from django.db.models import Count
-    from django.db.models.functions import TruncHour
-
-    now = timezone.now()
-    current_hour = now.replace(minute=0, second=0, microsecond=0)
-    since = current_hour - timedelta(hours=25)
-
-    rows = (
-        device.heartbeats
-        .filter(timestamp__gte=since, timestamp__lt=current_hour)
-        .annotate(hour=TruncHour('timestamp'))
-        .values('hour')
-        .annotate(
-            cpu_avg=Avg('cpu_percent'),
-            cpu_max=Max('cpu_percent'),
-            ram_avg=Avg('ram_percent'),
-            ram_max=Max('ram_percent'),
-            disk_avg=Avg('disk_percent'),
-            cnt=Count('id'),
-        )
-    )
-    for row in rows:
-        HourlyAggregate.objects.update_or_create(
-            device=device,
-            hour=row['hour'],
-            defaults={
-                'cpu_avg': round(row['cpu_avg'] or 0, 1),
-                'cpu_max': round(row['cpu_max'] or 0, 1),
-                'ram_avg': round(row['ram_avg'] or 0, 1),
-                'ram_max': round(row['ram_max'] or 0, 1),
-                'disk_avg': round(row['disk_avg'] or 0, 1),
-                'sample_count': row['cnt'],
-            }
-        )
-
-
-def _aggregate_background(device):
-    """aggregate_completed_hours'ı arka plan thread'inde çalıştırır.
-    Heartbeat yanıt süresini bloklamaz; hata olursa loglar.
-    """
-    try:
-        aggregate_completed_hours(device)
-        logger.debug('aggregate_completed_hours tamamlandı: %s', device.pk)
-    except Exception as exc:
-        logger.error('aggregate_completed_hours arka plan hatası [%s]: %s', device.pk, exc)
+    for dev in devices:
+        recent = dev.live_metrics.get('recent') or []
+        last = recent[-1] if recent else None
+        dev.latest_cpu = last.get('cpu_percent') if last else None
+        dev.latest_ram = last.get('ram_percent') if last else None
 
 
 # ============================================================
@@ -188,107 +147,103 @@ def register_device(request):
     )
 
 # 2. Sinyal (Heartbeat) alma (POST) — Token doğrulaması gerektirir
+# Satır eklemez: Device.live_metrics (JSONB) güncellenir + ham veri dosya sistemine arşivlenir.
 @api_view(['POST'])
 def receive_heartbeat(request):
-    _, auth_err = _require_token(request)
+    device_ref, auth_err = _require_token(request)
     if auth_err:
         return auth_err
 
-    serializer = HeartbeatLogSerializer(data=request.data)
-    if serializer.is_valid():
-        heartbeat = serializer.save()
+    serializer = HeartbeatPayloadSerializer(data=request.data)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    payload = serializer.validated_data
 
-        # threshold'u aynı sorguda JOIN ile çek — ayrı lazy-load sorgusu önlenir
-        device = Device.objects.select_related('threshold').get(pk=heartbeat.device_id)
-        update_fields = ['is_active', 'last_seen']
+    now = timezone.now()
+    with transaction.atomic():
+        # select_for_update: aynı cihazdan çakışan eşzamanlı yazımlara karşı JSONB güncellemesini korur
+        # of=('self',): kilidi sadece Device tablosuna uygula — threshold nullable OneToOne olduğu için
+        # LEFT OUTER JOIN tarafında FOR UPDATE Postgres'te desteklenmiyor.
+        device = Device.objects.select_for_update(of=('self',)).select_related('threshold').get(pk=device_ref.pk)
         was_inactive = not device.is_active
-        if was_inactive:
-            device.went_online_at = timezone.now()
-            update_fields.append('went_online_at')
-        device.is_active = True
-        device.save(update_fields=update_fields)
 
-        # Online geçişini logla (zaman çizelgesi için)
+        device.live_metrics = live_stats.apply_heartbeat(device.live_metrics, payload, now)
+        device.is_active = True
+        device.last_seen = now
+        device.heartbeat_count = F('heartbeat_count') + 1
+        update_fields = ['live_metrics', 'is_active', 'last_seen', 'heartbeat_count']
+        if was_inactive:
+            device.went_online_at = now
+            update_fields.append('went_online_at')
+        device.save(update_fields=update_fields)
+        device.refresh_from_db(fields=['heartbeat_count'])
+
         if was_inactive:
             DeviceStatusLog.objects.create(device=device, went_online=True)
 
-        # Cihaza özel eşik varsa kullan, yoksa global settings değerlerini kullan
-        thr = getattr(device, 'threshold', None)
-        gw  = settings.ALERT_WARNING_THRESHOLD
-        gc  = settings.ALERT_CRITICAL_THRESHOLD
-        metric_checks = [
-            (heartbeat.cpu_percent,  'CPU_HIGH',  'CPU',
-             thr.cpu_warning  if thr else gw, thr.cpu_critical  if thr else gc),
-            (heartbeat.ram_percent,  'RAM_HIGH',  'RAM',
-             thr.ram_warning  if thr else gw, thr.ram_critical  if thr else gc),
-            (heartbeat.disk_percent, 'DISK_FULL', 'Disk',
-             thr.disk_warning if thr else gw, thr.disk_critical if thr else gc),
-        ]
-        # Mevcut aktif alert'lerin (type, severity) çiftlerini al
-        active_alerts = set(
-            Alert.objects.filter(device=device, is_resolved=False)
-                         .values_list('alert_type', 'severity')
-        )
-        for value, alert_type, label, warn_thr, crit_thr in metric_checks:
-            if value >= crit_thr and (alert_type, Alert.SEVERITY_CRITICAL) not in active_alerts:
-                msg = f'{label} kullanımı KRİTİK seviyede: %{value:.1f}'
-                new_alert = Alert.objects.create(device=device, alert_type=alert_type,
-                                                 severity=Alert.SEVERITY_CRITICAL, message=msg)
-                logger.warning('CRITICAL alert: %s device=%s value=%.1f', alert_type, device.pk, value)
-                if _send_critical_alert_email(new_alert):
-                    new_alert.notified = True
-                    new_alert.save(update_fields=['notified'])
-            elif warn_thr <= value < crit_thr and (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
-                msg = f'{label} kullanımı UYARI seviyesinde: %{value:.1f}'
-                Alert.objects.create(device=device, alert_type=alert_type,
-                                     severity=Alert.SEVERITY_WARNING, message=msg)
-                logger.info('WARNING alert: %s device=%s value=%.1f', alert_type, device.pk, value)
+    # Ham veriyi dosya sistemine arşivle (DB kilidinin dışında — disk I/O yanıtı bloklamasın)
+    archive.append_heartbeat(device.pk, payload, now)
 
-        # Atomic counter — COUNT(*) yerine tek UPDATE+SELECT (çok daha hızlı)
-        Device.objects.filter(pk=device.pk).update(heartbeat_count=F('heartbeat_count') + 1)
-        device.refresh_from_db(fields=['heartbeat_count'])
-        total = device.heartbeat_count
-        logger.debug('heartbeat_count[%s]=%d', device.pk, total)
+    # Cihaza özel eşik varsa kullan, yoksa global settings değerlerini kullan
+    thr = getattr(device, 'threshold', None)
+    gw  = settings.ALERT_WARNING_THRESHOLD
+    gc  = settings.ALERT_CRITICAL_THRESHOLD
+    metric_checks = [
+        (payload['cpu_percent'],  'CPU_HIGH',  'CPU',
+         thr.cpu_warning  if thr else gw, thr.cpu_critical  if thr else gc),
+        (payload['ram_percent'],  'RAM_HIGH',  'RAM',
+         thr.ram_warning  if thr else gw, thr.ram_critical  if thr else gc),
+        (payload['disk_percent'], 'DISK_FULL', 'Disk',
+         thr.disk_warning if thr else gw, thr.disk_critical if thr else gc),
+    ]
+    # Mevcut aktif alert'lerin (type, severity) çiftlerini al
+    active_alerts = set(
+        Alert.objects.filter(device=device, is_resolved=False)
+                     .values_list('alert_type', 'severity')
+    )
+    for value, alert_type, label, warn_thr, crit_thr in metric_checks:
+        if value >= crit_thr and (alert_type, Alert.SEVERITY_CRITICAL) not in active_alerts:
+            msg = f'{label} kullanımı KRİTİK seviyede: %{value:.1f}'
+            new_alert = Alert.objects.create(device=device, alert_type=alert_type,
+                                             severity=Alert.SEVERITY_CRITICAL, message=msg)
+            logger.warning('CRITICAL alert: %s device=%s value=%.1f', alert_type, device.pk, value)
+            if _send_critical_alert_email(new_alert):
+                new_alert.notified = True
+                new_alert.save(update_fields=['notified'])
+        elif warn_thr <= value < crit_thr and (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
+            msg = f'{label} kullanımı UYARI seviyesinde: %{value:.1f}'
+            Alert.objects.create(device=device, alert_type=alert_type,
+                                 severity=Alert.SEVERITY_WARNING, message=msg)
+            logger.info('WARNING alert: %s device=%s value=%.1f', alert_type, device.pk, value)
 
-        # Anomali tespiti: her 4. heartbeat'te çalışır (≈1 dakikada bir, 15sn × 4)
-        if total % 4 == 0:
-            ANOMALY_WINDOW = 20
-            ANOMALY_MULTIPLIER = 2.0
-            recent_hbs = list(device.heartbeats.exclude(pk=heartbeat.pk).values_list(
-                'cpu_percent', 'ram_percent'
-            )[:ANOMALY_WINDOW])
-            if len(recent_hbs) >= 5:
-                cpu_vals = [r[0] for r in recent_hbs]
-                ram_vals = [r[1] for r in recent_hbs]
-                cpu_base = sum(cpu_vals) / len(cpu_vals)
-                ram_base = sum(ram_vals) / len(ram_vals)
-                for value, baseline, alert_type, label in [
-                    (heartbeat.cpu_percent, cpu_base, 'CPU_ANOMALY', 'CPU'),
-                    (heartbeat.ram_percent, ram_base, 'RAM_ANOMALY', 'RAM'),
-                ]:
-                    if baseline > 5 and value >= baseline * ANOMALY_MULTIPLIER:
-                        if (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
-                            msg = (f'{label} ani artış: %{value:.1f} '
-                                   f'(son {len(recent_hbs)} ölçüm ort. %{baseline:.1f})')
-                            Alert.objects.create(device=device, alert_type=alert_type,
-                                                 severity=Alert.SEVERITY_WARNING, message=msg)
-                            logger.info('ANOMALY alert: %s device=%s value=%.1f base=%.1f',
-                                        alert_type, device.pk, value, baseline)
+    total = device.heartbeat_count
+    logger.debug('heartbeat_count[%s]=%d', device.pk, total)
 
-        # Otomatik temizleme: her CLEANUP_EVERY kayıtta bir eski heartbeat'leri sil
-        if total > HEARTBEAT_LIMIT + CLEANUP_EVERY:
-            # aggregate ağır bir GROUP BY — arka planda çalıştır, yanıt süresini bloklamaz
-            threading.Thread(
-                target=_aggregate_background, args=(device,), daemon=True
-            ).start()
-            cutoff_ts = device.heartbeats.values_list('timestamp', flat=True)[HEARTBEAT_LIMIT:HEARTBEAT_LIMIT + 1]
-            if cutoff_ts:
-                device.heartbeats.filter(timestamp__lte=cutoff_ts[0]).delete()
-            hourly_cutoff = timezone.now() - timedelta(days=30)
-            device.hourly_stats.filter(hour__lt=hourly_cutoff).delete()
+    # Anomali tespiti: her 4. heartbeat'te çalışır (≈1 dakikada bir, 15sn × 4)
+    # Baz alınan pencere artık DB'den değil, live_metrics['recent'] içindeki son kayıtlardan gelir
+    # (yeni eklenen heartbeat hariç en fazla RECENT_LIMIT-1 = 9 ölçüm).
+    if total % 4 == 0:
+        ANOMALY_MULTIPLIER = 2.0
+        recent_hbs = device.live_metrics.get('recent', [])[:-1]
+        if len(recent_hbs) >= 5:
+            cpu_vals = [r['cpu_percent'] for r in recent_hbs]
+            ram_vals = [r['ram_percent'] for r in recent_hbs]
+            cpu_base = sum(cpu_vals) / len(cpu_vals)
+            ram_base = sum(ram_vals) / len(ram_vals)
+            for value, baseline, alert_type, label in [
+                (payload['cpu_percent'], cpu_base, 'CPU_ANOMALY', 'CPU'),
+                (payload['ram_percent'], ram_base, 'RAM_ANOMALY', 'RAM'),
+            ]:
+                if baseline > 5 and value >= baseline * ANOMALY_MULTIPLIER:
+                    if (alert_type, Alert.SEVERITY_WARNING) not in active_alerts:
+                        msg = (f'{label} ani artış: %{value:.1f} '
+                               f'(son {len(recent_hbs)} ölçüm ort. %{baseline:.1f})')
+                        Alert.objects.create(device=device, alert_type=alert_type,
+                                             severity=Alert.SEVERITY_WARNING, message=msg)
+                        logger.info('ANOMALY alert: %s device=%s value=%.1f base=%.1f',
+                                    alert_type, device.pk, value, baseline)
 
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    return Response(payload, status=status.HTTP_201_CREATED)
 
 # 3. Tüm cihazları listeleme (GET)
 @api_view(['GET'])
@@ -386,24 +341,23 @@ def resolve_alert(request, pk):
 # ============================================================
 
 # 11. Cihaz performans istatistikleri (GET) — Chart.js için
-# Son 30 heartbeat kaydını döndürür → grafik çizmek için
+# Canlı özet (Device.live_metrics) içindeki son en fazla 10 noktayı döndürür.
 @api_view(['GET'])
 def device_stats(request, pk):
-    """Bir cihazın son 30 heartbeat verisini döndürür.
+    """Bir cihazın canlı özetindeki son heartbeat noktalarını (en fazla 10) döndürür.
     Chart.js line chart bu veriyi kullanarak CPU/RAM/Disk grafiği çizer.
+    Daha derin geçmiş için dosya arşivi (CSV export) kullanılır.
     """
     try:
         device = Device.objects.get(pk=pk)
     except Device.DoesNotExist:
         return Response({'error': 'Cihaz bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Önce en yeni 30'u al, sonra ters çevir → Chart.js soldan sağa doğru zaman ekseni
-    heartbeats = list(reversed(list(device.heartbeats.all()[:30])))
-    serializer = HeartbeatChartSerializer(heartbeats, many=True)
+    heartbeats = device.live_metrics.get('recent', [])  # zaten eski->yeni sıralı
     return Response({
         'device': pk,
-        'count': len(serializer.data),
-        'heartbeats': serializer.data,
+        'count': len(heartbeats),
+        'heartbeats': heartbeats,
     })
 
 # 12. Dashboard özet istatistikleri (GET)
@@ -445,26 +399,24 @@ def dashboard_stats(request):
 # 13. Saatlik trend verisi (GET) — son 24 saat
 @api_view(['GET'])
 def device_hourly_trend(request, pk):
-    """Bir cihazın son 24 saatlik ortalama metriklerini döndürür.
+    """Bir cihazın son 24 saatlik kayan ortalama metriklerini döndürür.
     Chart.js bar chart bu veriyi kullanarak geçmiş trend grafiği çizer.
+    Kaynak: Device.live_metrics['windows'] (saatlik bucket'lar) — bkz. monitoring/live_stats.py.
     """
     try:
         device = Device.objects.get(pk=pk)
     except Device.DoesNotExist:
         return Response({'error': 'Cihaz bulunamadı'}, status=status.HTTP_404_NOT_FOUND)
 
-    since = timezone.now() - timedelta(hours=24)
-    rows = list(reversed(list(
-        device.hourly_stats.filter(hour__gte=since).order_by('-hour')[:24]
-    )))
+    rows = live_stats.hourly_trend(device.live_metrics)
     data = [{
-        'hour': r.hour.strftime('%H:00'),
-        'cpu_avg': r.cpu_avg,
-        'cpu_max': r.cpu_max,
-        'ram_avg': r.ram_avg,
-        'ram_max': r.ram_max,
-        'disk_avg': r.disk_avg,
-        'sample_count': r.sample_count,
+        'hour': r['hour'][11:16],  # ISO "...THH:MM:SS" -> "HH:MM"
+        'cpu_avg': r['cpu_avg'],
+        'cpu_max': r['cpu_max'],
+        'ram_avg': r['ram_avg'],
+        'ram_max': r['ram_max'],
+        'disk_avg': r['disk_avg'],
+        'sample_count': r['sample_count'],
     } for r in rows]
     return Response({'device': pk, 'hours': data})
 
@@ -506,13 +458,10 @@ def dashboard_view(request):
     recent_alerts = list(
         Alert.objects.select_related('device').order_by('-created_at')[:5]
     )
-    latest_hb = HeartbeatLog.objects.filter(device=OuterRef('pk')).order_by('-timestamp')
     devices_heatmap = list(
-        Device.objects.select_related('hardware').annotate(
-            latest_cpu=Subquery(latest_hb.values('cpu_percent')[:1], output_field=FloatField()),
-            latest_ram=Subquery(latest_hb.values('ram_percent')[:1], output_field=FloatField()),
-        ).order_by('-is_active', 'mac_address')
+        Device.objects.select_related('hardware').order_by('-is_active', 'mac_address')
     )
+    _attach_latest_metrics(devices_heatmap)
 
     context = {
         **stats,
@@ -526,20 +475,16 @@ def device_list_view(request):
     """Cihaz listesi sayfası — tag filtresi destekli."""
     mark_stale_devices_inactive()
     selected_tag = request.GET.get('tag', '').strip()
-    latest_hb = HeartbeatLog.objects.filter(device=OuterRef('pk')).order_by('-timestamp')
     qs = (
         Device.objects
         .select_related('location', 'hardware')
         .prefetch_related('tags')
-        .annotate(
-            latest_cpu=Subquery(latest_hb.values('cpu_percent')[:1], output_field=FloatField()),
-            latest_ram=Subquery(latest_hb.values('ram_percent')[:1], output_field=FloatField()),
-        )
     )
     if selected_tag:
         qs = qs.filter(tags__name=selected_tag).distinct()
     paginator = Paginator(qs, 20)
     page = paginator.get_page(request.GET.get('page'))
+    _attach_latest_metrics(page.object_list)
     all_tags = Tag.objects.all().order_by('name')
     return render(request, 'monitoring/device_list.html', {
         'devices': page,
@@ -558,16 +503,15 @@ def device_detail_view(request, pk):
     hardware  = getattr(device, 'hardware', None)
     location  = getattr(device, 'location', None)
     threshold = getattr(device, 'threshold', None)
-    recent_heartbeats = device.heartbeats.all()[:30]
-    recent_alerts     = device.alerts.order_by('-created_at')[:10]
-    latest_hb         = device.heartbeats.first()
+    recent_alerts = device.alerts.order_by('-created_at')[:10]
+    recent        = device.live_metrics.get('recent', [])
+    latest_hb     = recent[-1] if recent else None
 
     context = {
         'device': device,
         'hardware': hardware,
         'location': location,
         'threshold': threshold,
-        'recent_heartbeats': recent_heartbeats,
         'recent_alerts': recent_alerts,
         'latest_hb': latest_hb,
     }
@@ -712,7 +656,7 @@ def device_status_log(request, pk):
 # ============================================================
 
 def device_heartbeats_csv(request, pk):
-    """Bir cihazın son N heartbeat'ini CSV olarak indirir."""
+    """Bir cihazın son N heartbeat'ini, dosya sistemi arşivinden okuyarak CSV olarak indirir."""
     device = get_object_or_404(Device, pk=pk)
     try:
         limit = min(max(int(request.GET.get('limit', 100)), 1), 1440)
@@ -728,18 +672,43 @@ def device_heartbeats_csv(request, pk):
         'Zaman', 'CPU %', 'RAM %', 'Disk %',
         'Gönderilen (B)', 'Alınan (B)', 'Süreç', 'Batarya %',
     ])
-    for hb in device.heartbeats.all()[:limit]:
+    # read_recent eski->yeni döner; CSV'de en yeni en üstte olsun diye ters çevriliyor
+    for hb in reversed(archive.read_recent(pk, limit)):
+        battery = hb.get('battery_percent')
         writer.writerow([
-            hb.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-            hb.cpu_percent,
-            hb.ram_percent,
-            hb.disk_percent,
-            hb.net_bytes_sent,
-            hb.net_bytes_recv,
-            hb.process_count,
-            hb.battery_percent if hb.battery_percent is not None else '',
+            hb.get('timestamp', ''),
+            hb.get('cpu_percent', ''),
+            hb.get('ram_percent', ''),
+            hb.get('disk_percent', ''),
+            hb.get('net_bytes_sent', ''),
+            hb.get('net_bytes_recv', ''),
+            hb.get('process_count', ''),
+            battery if battery is not None else '',
         ])
     return response
+
+
+# ============================================================
+# ARŞİV — Dosya sistemi arşivindeki ham günlük dosyaları listeleme/indirme
+# ============================================================
+
+def device_archive_list_view(request, pk):
+    """Bir cihazın dosya sistemi arşivinde mevcut günleri (ve dosya boyutlarını) listeler."""
+    get_object_or_404(Device, pk=pk)
+    return JsonResponse({'device': pk, 'days': archive.list_days(pk)})
+
+
+def device_archive_download_view(request, pk, day):
+    """Belirli bir günün ham heartbeat arşiv dosyasını (.jsonl) olduğu gibi indirir."""
+    get_object_or_404(Device, pk=pk)
+    file_path = archive.day_file_path(pk, day)
+    if file_path is None:
+        raise Http404('Arşiv dosyası bulunamadı')
+    fname = f"{pk.replace(':', '-')}_{day}.jsonl"
+    return FileResponse(
+        open(file_path, 'rb'), as_attachment=True,
+        filename=fname, content_type='application/x-ndjson',
+    )
 
 
 def alerts_csv(request):

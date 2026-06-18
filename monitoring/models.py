@@ -19,6 +19,20 @@ class Device(models.Model):
     tags            = models.ManyToManyField('Tag', blank=True, related_name='devices')
     heartbeat_count = models.PositiveIntegerField(default=0)
 
+    # Canlı özet — yüksek frekanslı heartbeat verisini satır satır DB'ye yazmak
+    # yerine cihaz başına tek JSONB hücrede tutar. Yapı (bkz. monitoring/live_stats.py):
+    #   {
+    #     "recent":  [ {...tam heartbeat payload..., "timestamp": "..."} ],  # en fazla 10
+    #     "windows": {
+    #         "cpu_percent":  {"sum": ..., "count": ..., "buckets": [{"hour", "sum", "count", "max"}, ...]},
+    #         "ram_percent":  {...},
+    #         "disk_percent": {...},
+    #     },
+    #   }
+    # "windows" saatlik bucket'larla gerçek kayan 24 saatlik ortalamayı O(1) günceller
+    # (bkz. live_stats.apply_heartbeat).
+    live_metrics = models.JSONField(default=dict, blank=True)
+
     class Meta:
         indexes = [
             models.Index(fields=['is_active', 'last_seen'], name='device_active_seen_idx'),
@@ -29,7 +43,8 @@ class Device(models.Model):
 
     @property
     def latest_heartbeat(self):
-        return self.heartbeats.first()
+        recent = self.live_metrics.get('recent') or []
+        return recent[-1] if recent else None
 
     @property
     def uptime_display(self):
@@ -71,98 +86,6 @@ class HardwareSpec(models.Model):
 
     def __str__(self):
         return f"{self.hostname or self.device_id} — {self.cpu_info}"
-
-
-class HeartbeatLog(models.Model):
-    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='heartbeats')
-
-    # ============================================================
-    # ANA METRİKLER — Özet kartlar + grafikler
-    # ============================================================
-    cpu_percent = models.FloatField(default=0)          # Toplam CPU kullanımı (%)
-    ram_percent = models.FloatField(default=0)          # RAM kullanımı (%)
-    disk_percent = models.FloatField(default=0)         # Disk kullanımı (%)
-    process_count = models.IntegerField(default=0)      # Çalışan süreç sayısı
-    battery_percent = models.FloatField(null=True, blank=True)   # Batarya %
-    battery_plugged = models.BooleanField(null=True, blank=True) # Şarjda mı?
-
-    # ============================================================
-    # CPU DETAY — Etkinlik Monitörü CPU sekmesi
-    # ============================================================
-    cpu_system = models.FloatField(default=0)           # Sistem CPU (%)
-    cpu_user = models.FloatField(default=0)             # Kullanıcı CPU (%)
-    cpu_idle = models.FloatField(default=0)             # Boş CPU (%)
-    cpu_freq = models.FloatField(default=0)             # CPU frekansı (MHz)
-    thread_count = models.IntegerField(default=0)       # İş parçacığı sayısı
-    cpu_per_core   = models.JSONField(default=list, blank=True)      # Her çekirdek kullanımı [%]
-    cpu_temperature = models.FloatField(null=True, blank=True)       # CPU sıcaklığı (°C), platform desteklemiyorsa None
-
-    # ============================================================
-    # BELLEK DETAY — Etkinlik Monitörü Bellek sekmesi
-    # ============================================================
-    memory_total = models.BigIntegerField(default=0)    # Fiziksel bellek (byte)
-    memory_used = models.BigIntegerField(default=0)     # Kullanılan bellek (byte)
-    memory_available = models.BigIntegerField(default=0)  # Kullanılabilir bellek (byte)
-    memory_cached = models.BigIntegerField(default=0)   # Önbellekteki dosya (byte)
-    swap_total = models.BigIntegerField(default=0)      # Toplam takas alanı (byte)
-    swap_used = models.BigIntegerField(default=0)       # Kullanılan takas (byte)
-
-    # ============================================================
-    # DİSK DETAY — Etkinlik Monitörü Disk sekmesi
-    # ============================================================
-    disk_read_bytes = models.BigIntegerField(default=0)   # Toplam okunan (byte)
-    disk_write_bytes = models.BigIntegerField(default=0)  # Toplam yazılan (byte)
-    disk_partitions = models.JSONField(default=list, blank=True)  # Bölüm listesi
-
-    # ============================================================
-    # AĞ DETAY — Etkinlik Monitörü Ağ sekmesi
-    # ============================================================
-    net_bytes_sent   = models.BigIntegerField(default=0)     # Gönderilen veri (byte)
-    net_bytes_recv   = models.BigIntegerField(default=0)     # Alınan veri (byte)
-    net_packets_sent = models.BigIntegerField(default=0)     # Gönderilen paket
-    net_packets_recv = models.BigIntegerField(default=0)     # Alınan paket
-    net_per_nic      = models.JSONField(default=dict, blank=True)  # Arayüz bazında istatistikler
-
-    # ============================================================
-    # TOP İŞLEMLER — En çok CPU/RAM kullanan 10 uygulama
-    # ============================================================
-    # JSON formatında: [{"name":"Safari","cpu":12.5,"mem":387.2}, ...]
-    top_processes = models.JSONField(default=list, blank=True)
-
-    timestamp = models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering = ['-timestamp']
-        indexes = [
-            # En kritik index: cihaza göre son kayıtları çekme (dashboard grafikleri)
-            models.Index(fields=['device', '-timestamp'], name='heartbeat_device_ts_idx'),
-        ]
-
-    def __str__(self):
-        return f"{self.device_id} - CPU:{self.cpu_percent}% RAM:{self.ram_percent}% - {self.timestamp}"
-
-
-class HourlyAggregate(models.Model):
-    """Bir cihazın belirli bir saate ait ortalama metriklerini saklar."""
-    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='hourly_stats')
-    hour = models.DateTimeField()  # Saatin başlangıcı (dakika/saniye=0)
-
-    cpu_avg = models.FloatField(default=0)
-    cpu_max = models.FloatField(default=0)
-    ram_avg = models.FloatField(default=0)
-    ram_max = models.FloatField(default=0)
-    disk_avg = models.FloatField(default=0)
-    sample_count = models.IntegerField(default=0)
-
-    class Meta:
-        unique_together = ('device', 'hour')
-        ordering = ['-hour']
-        indexes = [
-            models.Index(fields=['device', '-hour'], name='hourly_device_hour_idx'),
-        ]
-
-    def __str__(self):
-        return f"{self.device_id} @ {self.hour:%Y-%m-%d %H:00} — CPU avg:{self.cpu_avg:.1f}%"
 
 
 class Tag(models.Model):

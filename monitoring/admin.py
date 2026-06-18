@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
-    Device, Location, HardwareSpec, HeartbeatLog, Alert,
-    Tag, DeviceThreshold, DeviceStatusLog, HourlyAggregate,
+    Device, Location, HardwareSpec, Alert,
+    Tag, DeviceThreshold, DeviceStatusLog,
 )
 
 
@@ -26,28 +26,6 @@ class HardwareSpecAdmin(admin.ModelAdmin):
     ordering = ('-last_updated',)
 
 
-@admin.register(HeartbeatLog)
-class HeartbeatLogAdmin(admin.ModelAdmin):
-    list_display = ('device', 'cpu_percent', 'ram_percent', 'disk_percent', 'process_count', 'batarya_durumu', 'zaman_damgasi')
-    list_filter = ('device',)
-    ordering = ('-timestamp',)
-    list_select_related = ('device',)
-
-    @admin.display(description='Zaman Damgası')
-    def zaman_damgasi(self, obj):
-        if obj.timestamp:
-            return obj.timestamp.strftime('%d %b %Y %H:%M:%S')
-        return '-'
-
-    @admin.display(description='Batarya')
-    def batarya_durumu(self, obj):
-        """Batarya bilgisini ikon ile gösterir"""
-        if obj.battery_percent is None:
-            return 'Masaüstü'  # Batarya yoksa masaüstü bilgisayar
-        plug = '🔌' if obj.battery_plugged else '🔋'
-        return f'{plug} %{obj.battery_percent:.0f}'
-
-
 @admin.register(Alert)
 class AlertAdmin(admin.ModelAdmin):
     list_display = ('device', 'alert_type', 'severity', 'message', 'is_resolved', 'notified', 'created_at')
@@ -62,7 +40,7 @@ class AlertAdmin(admin.ModelAdmin):
 
 
 # ============================================================
-# YENİ KAYITLAR — Tag, DeviceThreshold, DeviceStatusLog, HourlyAggregate
+# YENİ KAYITLAR — Tag, DeviceThreshold, DeviceStatusLog
 # ============================================================
 
 @admin.register(Tag)
@@ -98,12 +76,4 @@ class DeviceStatusLogAdmin(admin.ModelAdmin):
     @admin.display(description='Durum')
     def durum(self, obj):
         return '🟢 Online' if obj.went_online else '🔴 Offline'
-
-
-@admin.register(HourlyAggregate)
-class HourlyAggregateAdmin(admin.ModelAdmin):
-    list_display = ('device', 'hour', 'cpu_avg', 'cpu_max', 'ram_avg', 'ram_max', 'disk_avg', 'sample_count')
-    list_filter = ('device',)
-    ordering = ('-hour',)
-    list_select_related = ('device',)
 

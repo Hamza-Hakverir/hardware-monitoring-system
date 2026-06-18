@@ -60,6 +60,9 @@
         <a href="{% url 'ui_heartbeats_csv' pk=device.mac_address %}?limit=200" class="btn btn-sm btn-outline-secondary" title="Son 200 heartbeat CSV">
             <i class="bi bi-download me-1"></i>CSV
         </a>
+        <a href="{% url 'ui_device_archive_list' pk=device.mac_address %}" class="btn btn-sm btn-outline-secondary" title="Ham arşivdeki günleri listele (JSON)">
+            <i class="bi bi-archive me-1"></i>Arşiv
+        </a>
     </div>
 </div>
 

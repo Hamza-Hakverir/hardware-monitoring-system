@@ -31,9 +31,11 @@
 | **CSV Dışa Aktarım** | Heartbeat ve Alert verileri CSV olarak indirilebilir |
 | **Dark / Light Mode** | Tema tercihi localStorage ile kalıcı olarak saklanır |
 | **Otomatik Pasifleştirme** | 2 dakika sinyal gelmezse cihaz otomatik "Pasif" olarak işaretlenir |
-| **Veri Optimizasyonu** | Cihaz başına maks 1440 kayıt tutulur; eski veriler saatlik ortalamaya çevrilir |
-| **Windows Servis** | `install_service.py` ile agent Windows servisi olarak kurulabilir |
-| **Linux Systemd** | `devmonitor.service` ile agent Linux servisi olarak çalıştırılabilir |
+| **Canlı Özet Mimarisi** | Heartbeat'ler ilişkisel tabloya satır olarak eklenmez; her cihaz `Device.live_metrics` (JSONB) içinde tek satırda güncellenir — bkz. "Canlı Özet & Arşiv Mimarisi" bölümü |
+| **Dosya Sistemi Arşivi** | Ham heartbeat geçmişi `archive/<mac>/<tarih>.jsonl` dosyalarında saklanır; CSV export'un yanı sıra hangi günlerin arşivlendiğini listeleyip tek bir günü ham `.jsonl` olarak indirebileceğiniz bir API de var |
+| **Windows Servis** | `install_service.py` ile agent Windows servisi olarak kurulabilir; `secure` komutu çökme sonrası otomatik kurtarma + yetkisiz durdurmaya karşı ACL kısıtlaması ekler |
+| **Linux Systemd** | `devmonitor.service` ile agent Linux servisi olarak çalıştırılabilir; `ProtectSystem`/`OOMScoreAdjust` gibi sertleştirme ayarlarıyla gelir |
+| **Kurulum Sihirbazı** | `setup_agent.py` — hedef bilgisayara agent bağımlılıklarını kurar, sunucu adresini sorar, Windows servisi veya Linux systemd unit'ini otomatik kurup başlatır |
 
 ---
 
@@ -61,14 +63,17 @@ hardware_monitoring_system/
 │   ├── wsgi.py
 │   └── asgi.py
 ├── monitoring/
-│   ├── models.py            # 9 model (Device, HardwareSpec, HeartbeatLog,
-│   │                        #   Alert, Location, Tag, DeviceThreshold,
-│   │                        #   DeviceStatusLog, HourlyAggregate)
-│   ├── views.py             # 20 API + UI view (832 satır)
-│   ├── serializers.py       # 6 DRF serializer (basit + nested)
-│   ├── urls.py              # 20 endpoint (API + UI)
-│   ├── admin.py             # 9 modelin tamamı admin panelinde
-│   ├── migrations/          # 17 migration dosyası
+│   ├── models.py            # 7 model (Device — live_metrics JSONB dahil —,
+│   │                        #   HardwareSpec, Alert, Location, Tag,
+│   │                        #   DeviceThreshold, DeviceStatusLog)
+│   ├── live_stats.py        # Kayan 24 saatlik pencere matematiği (sum/count + bucket eviction)
+│   ├── archive.py           # Ham heartbeat'lerin dosya sistemi arşivi (JSONL)
+│   ├── tests.py             # live_stats + archive testleri
+│   ├── views.py             # API + UI view'lar
+│   ├── serializers.py       # DRF serializer'lar (basit + nested)
+│   ├── urls.py              # API + UI endpoint'leri
+│   ├── admin.py             # Modellerin admin panel kayıtları
+│   ├── migrations/          # Migration dosyaları
 │   └── templates/monitoring/
 │       ├── base.html           # Navbar, dark/light, toast sistemi
 │       ├── dashboard.html      # Ana panel — istatistik kartları + grafikler
@@ -80,9 +85,10 @@ hardware_monitoring_system/
 │       ├── threshold_form.html # Cihaza özel eşik ayarları
 │       └── manage_tags.html    # Tag oluşturma ve atama
 ├── agent.py                 # İstemci agent — psutil ile veri toplar + gönderir
-├── baslat.py                # Tek komutla başlatıcı (Django + Agent)
-├── install_service.py       # Windows servis yükleyici (pywin32)
-├── devmonitor.service       # Linux systemd servis dosyası
+├── baslat.py                # Tek komutla başlatıcı (Django + Agent) — geliştirme/demo amaçlı
+├── setup_agent.py           # Hedef bilgisayara agent kurulum sihirbazı (Windows/Linux)
+├── install_service.py       # Windows servis yükleyici (pywin32) + secure (ACL kısıtlaması)
+├── devmonitor.service       # Linux systemd servis dosyası (sertleştirilmiş)
 ├── CALISTIR.bat             # Windows çift tıklama kısayolu
 ├── manage.py
 ├── requirements.txt
@@ -104,20 +110,10 @@ hardware_monitoring_system/
 | `token` | CharField (64) | API kimlik doğrulama tokeni |
 | `tags` | M2M → Tag | Atanmış etiketler |
 | `heartbeat_count` | IntegerField | Toplam heartbeat sayısı (atomic) |
+| `live_metrics` | **JSONField** | Canlı özet — son 10 heartbeat + 24 saatlik kayan ortalama bucket'ları. Detay: "Canlı Özet & Arşiv Mimarisi" bölümü |
 
 ### `HardwareSpec` — Statik donanım özellikleri
 `cpu_info`, `cpu_cores`, `cpu_threads`, `ram_total`, `vga_info`, `hostname`, `ip_address`
-
-### `HeartbeatLog` — Anlık performans kayıtları (15 saniyede bir)
-| Grup | Alanlar |
-|---|---|
-| Ana metrikler | `cpu_percent`, `ram_percent`, `disk_percent`, `process_count` |
-| Batarya | `battery_percent`, `battery_plugged` |
-| CPU detay | `cpu_system`, `cpu_user`, `cpu_idle`, `cpu_freq`, `thread_count`, `cpu_per_core` (JSON), `cpu_temperature` |
-| Bellek detay | `memory_total`, `memory_used`, `memory_available`, `memory_cached`, `swap_total`, `swap_used` |
-| Disk I/O | `disk_read_bytes`, `disk_write_bytes`, `disk_partitions` (JSON) |
-| Ağ | `net_bytes_sent`, `net_bytes_recv`, `net_packets_sent`, `net_packets_recv`, `net_per_nic` (JSON) |
-| İşlemler | `top_processes` (JSON — Top 10 CPU/RAM/Thread) |
 
 ### `Alert` — Sistem uyarıları
 `alert_type` · `severity` (WARNING / CRITICAL) · `message` · `is_resolved` · `notified` · `resolution_note` · `resolved_at`
@@ -128,14 +124,69 @@ hardware_monitoring_system/
 ### `DeviceStatusLog` — Online/Offline geçiş kayıtları
 `went_online` (bool) · `timestamp` — Zaman çizelgesi grafiği bu tablodan beslenir.
 
-### `HourlyAggregate` — Saatlik özet
-`cpu_avg`, `cpu_max`, `ram_avg`, `ram_max`, `disk_avg`, `sample_count` — 24 saatlik trend grafiği için.
-
 ### `Tag` — Cihaz etiketleri
 `name`, `color` (hex) — Cihazlara M2M ilişkiyle atanır.
 
 ### `Location` — Fiziksel konum
 `building`, `floor`, `room`
+
+---
+
+## 🧮 Canlı Özet & Arşiv Mimarisi
+
+**Sorun:** Her cihazdan 15sn'de bir gelen heartbeat'i ilişkisel tabloya satır
+olarak eklemek (binlerce cihazda) veritabanını kısa sürede kilitler.
+
+**Çözüm — depolamayı ikiye ayırmak:**
+
+| | Ne tutar | Nerede |
+|---|---|---|
+| **Canlı özet** | Her cihaz **tek satırda** — son 10 ölçüm + 24 saatlik kayan ortalama | `Device.live_metrics` (PostgreSQL **JSONB**) |
+| **Ham arşiv** | Geçmişe dönük tüm ölçümler, sadece gerektiğinde okunur | Dosya sistemi — `archive/<mac>/<YYYY-MM-DD>.jsonl` |
+
+Yeni bir heartbeat geldiğinde **satır eklenmez** — `Device` satırının
+`live_metrics` hücresi güncellenir (`monitoring/live_stats.py:apply_heartbeat`):
+
+```json
+{
+  "recent": [ {"...tam heartbeat verisi...", "timestamp": "..."} ],  // en fazla 10 — en eski düşer, yeni sona eklenir (shift)
+  "windows": {
+    "cpu_percent":  {"sum": 812.4, "count": 34, "buckets": [{"hour": "...", "sum": 41.2, "count": 4, "max": 55.0}, ...]},
+    "ram_percent":  { "...": "..." },
+    "disk_percent": { "...": "..." }
+  }
+}
+```
+
+### 24 saatlik kayan ortalama matematiği
+
+Tüm satırları toplamak yerine **Sum/Count sayaçları** O(1) güncellenir:
+
+```
+Yeni değer v geldiğinde:
+    bucket.sum   += v ;  bucket.count   += 1     (v'nin ait olduğu saat bucket'ı)
+    window.sum   += v ;  window.count   += 1     (24 saatlik toplam — anında)
+
+24 saatten eski bir bucket pencereden çıkarken:
+    window.sum   -= evicted.sum
+    window.count -= evicted.count
+
+Ortalama = window.sum / window.count   (her zaman, yeniden taramadan)
+```
+
+Bucket'lar 1 saatlik granülerlikte tutulur (sabit boyutlu "circular buffer").
+**Takvim günü sıfırlaması yoktur** — pencere gerçek anlamda kayar, böylece gece
+yarısı sınırında ortalama aniden sıfırlanıp zıplamaz. Bu matematik
+`monitoring/tests.py` içindeki testlerle (200 saatlik simülasyon dahil)
+doğrulanmıştır.
+
+### Ham arşiv
+
+`monitoring/archive.py`, her heartbeat'i `archive/<mac-with-dashes>/<tarih>.jsonl`
+dosyasına bir satır olarak ekler (append). CSV export ve geçmiş inceleme bu
+dosyalardan okunur; canlı dashboard/grafikler asla bu dosyalara dokunmaz.
+(MAC adresindeki `:` Windows'ta dosya adında geçersiz olduğu için `-` ile
+değiştirilir.)
 
 ---
 
@@ -149,8 +200,8 @@ Base URL: `http://127.0.0.1:8000/api/monitoring/`
 | POST | `devices/register/` | Yeni cihaz kaydet / token al |
 | GET | `devices/` | Tüm cihazları listele |
 | GET | `devices/<mac>/` | Cihaz detayı (nested: konum + donanım + son heartbeat) |
-| GET | `devices/<mac>/stats/` | Son 30 heartbeat — Chart.js grafik verisi |
-| GET | `devices/<mac>/hourly/` | Son 24 saatlik ortalama — trend grafik verisi |
+| GET | `devices/<mac>/stats/` | Canlı özetteki son ≤10 heartbeat — Chart.js mini grafik verisi |
+| GET | `devices/<mac>/hourly/` | Kayan 24 saatlik ortalama — trend grafik verisi (`live_metrics['windows']`'den) |
 | GET | `devices/<mac>/status-log/` | Son 7 günün online/offline geçişleri |
 
 ### Heartbeat & Donanım
@@ -182,6 +233,8 @@ Base URL: `http://127.0.0.1:8000/api/monitoring/`
 | `ui/devices/<mac>/tags/` | Tag yönetimi |
 | `ui/devices/<mac>/export/heartbeats/` | Heartbeat CSV indir |
 | `ui/alerts/export/` | Alert CSV indir |
+| `ui/devices/<mac>/archive/` | Dosya sistemi arşivinde mevcut günleri listele (JSON) |
+| `ui/devices/<mac>/archive/<YYYY-MM-DD>/download/` | Belirli bir günün ham `.jsonl` arşiv dosyasını indir |
 
 ---
 
@@ -260,8 +313,25 @@ python agent.py
 ```bash
 # Yönetici olarak çalıştır:
 python install_service.py install
+python install_service.py secure   # kurtarma aksiyonları + ACL kısıtlaması (bkz. aşağıda)
 python install_service.py start
 ```
+
+### Yöntem E — Kurulum Sihirbazı (izlenecek hedef bilgisayara dağıtım için)
+
+Bir bilgisayarı izlemeye almak için bu dosyaları (en azından `agent.py`,
+`setup_agent.py`, `install_service.py`, `devmonitor.service`) o makineye
+kopyalayıp çalıştırın:
+
+```bash
+python setup_agent.py
+```
+
+Script sırasıyla: agent bağımlılıklarını (`psutil`, `requests` — **sunucu
+bağımlılıkları değil**) kurar, sunucu adresini sorar, platforma göre Windows
+Servisi (`install_service.py install` + `secure` + `start`) veya Linux systemd
+unit'i (`/etc/systemd/system/devmonitor.service`, root gerektirir) kurup
+başlatır. macOS'ta otomatik servis kurulumu yoktur, manuel komut önerilir.
 
 ### Erişim Adresleri
 
@@ -301,12 +371,53 @@ python install_service.py start
 
 | Tablo | Index | Amaç |
 |---|---|---|
-| `HeartbeatLog` | `(device, timestamp DESC)` | Dashboard grafik sorguları |
-| `HourlyAggregate` | `(device, hour DESC)` | 24 saatlik trend sorguları |
 | `Alert` | `(is_resolved, created_at DESC)` | Çözülmemiş uyarı sorguları |
 | `Alert` | `(device, created_at DESC)` | Cihaza ait uyarı sorguları |
 | `Device` | `(is_active, last_seen)` | Pasif cihaz tespiti |
 | `DeviceStatusLog` | `(device, timestamp DESC)` | Zaman çizelgesi sorguları |
+
+> Heartbeat/saatlik trend verisi artık ayrı tablolarda değil, `Device.live_metrics`
+> (JSONB) içinde — bu sorgular ek index gerektirmeden tek satır okumasıyla gelir.
+
+---
+
+## 🛡️ Agent Çökme Koruması (Client Guard)
+
+### Windows
+
+`install_service.py`, agent.py'yi Windows servisi olarak çalıştırır ve iki katmanlı koruma sağlar:
+
+1. **Süreç seviyesi:** Servis içindeki Python döngüsü, agent.py alt süreci çökerse
+   5 saniye içinde yeniden başlatır.
+2. **Servis seviyesi (`secure` komutu):** `sc failure` ile SCM'e, servisin
+   kendisi (host süreç) çökse bile otomatik yeniden başlatma talimatı verilir;
+   `sc sdset` ile servis kontrol ACL'i kısıtlanır — yalnızca **Administrators**
+   ve **SYSTEM** servisi başlatıp durdurabilir. Standart/amatör bir kullanıcı
+   Görev Yöneticisi, `services.msc` veya `sc stop` ile servisi durduramaz
+   ("Access is denied").
+
+Doğrulama: `sc sdshow DevMonitorAgent` ile uygulanan ACL'i, `sc qfailure
+DevMonitorAgent` ile kurtarma aksiyonlarını görebilirsiniz.
+
+### Linux
+
+`devmonitor.service`, agent.py'yi bir systemd unit'i olarak çalıştırır:
+
+- **`Restart=always`** — agent.py beklenmedik şekilde (hata koduyla veya temiz
+  `exit(0)` ile) kapanırsa yeniden başlatılır. `systemctl stop devmonitor` ile
+  kasıtlı durdurma bu davranışı etkilemez.
+- **`OOMScoreAdjust=-1000`** — bellek darlığında Linux OOM killer bu süreci
+  hedef almaz.
+- **`ProtectSystem=strict`, `ProtectHome=read-only`, `NoNewPrivileges=true`** —
+  agent.py dosya sistemine yazmadığı için güvenle sandbox'lanabilir.
+- **`KillMode=none` kasıtlı olarak KULLANILMADI** — modern systemd'de bu ayar
+  orphan (sahipsiz) süreçler bırakabildiği için resmi olarak önerilmiyor;
+  varsayılan `KillMode=control-group` korunmuştur.
+- **Yetkisiz durdurma koruması:** Bu, sistem genelinde (`--user` değil) bir
+  unit olduğu için `systemctl stop devmonitor` çalıştırmak zaten root/sudo veya
+  polkit yetkisi gerektirir — ek bir ayara gerek yoktur. Doğrulamak için
+  yetkisiz bir oturumdan (sudo OLMADAN) `systemctl stop devmonitor` deneyin;
+  "Interactive authentication required" hatası almalısınız.
 
 ---
 

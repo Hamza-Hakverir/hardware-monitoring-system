@@ -47,5 +47,7 @@ urlpatterns = [
     path('ui/devices/<str:pk>/threshold/', views.device_threshold_view, name='ui_device_threshold'),
     path('ui/devices/<str:pk>/tags/', views.manage_device_tags_view, name='ui_device_tags'),
     path('ui/devices/<str:pk>/export/heartbeats/', views.device_heartbeats_csv, name='ui_heartbeats_csv'),
+    path('ui/devices/<str:pk>/archive/', views.device_archive_list_view, name='ui_device_archive_list'),
+    path('ui/devices/<str:pk>/archive/<str:day>/download/', views.device_archive_download_view, name='ui_device_archive_download'),
     path('ui/alerts/export/', views.alerts_csv, name='ui_alerts_csv'),
 ]

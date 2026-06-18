@@ -20,8 +20,11 @@ ExecStart=/usr/bin/python3 /opt/devmonitor/agent.py
 # Sunucu adresi veya heartbeat aralığını değiştirmek için:
 # ExecStart=/usr/bin/python3 /opt/devmonitor/agent.py --server http://192.168.1.10:8000/api/monitoring --interval 30
 
-# Beklenmedik çıkışlarda otomatik yeniden başlat (5sn bekle)
-Restart=on-failure
+# Beklenmedik çıkışlarda otomatik yeniden başlat — on-failure değil always:
+# agent.py SIGTERM dışında temiz (exit 0) ama beklenmeyen bir şekilde de
+# kapanırsa yine yeniden başlatılsın. 'systemctl stop' ile kasıtlı durdurma
+# bu davranışı etkilemez (systemd bunu ayrıca bir "stop job" olarak işaretler).
+Restart=always
 RestartSec=5s
 
 # Servis başlamadan önce ağın hazır olmasını bekle (ek güvence)
@@ -31,6 +34,29 @@ ExecStartPre=/bin/sleep 3
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=devmonitor
+
+# ---- Çökme/sonlandırma koruması (OS seviyesi guard) ----
+# OOM killer bellek darlığında bu süreci öncelikli HEDEF ALMASIN
+# (-1000 = "asla öldürme", varsayılan 0'a göre çok daha düşük öncelik)
+OOMScoreAdjust=-1000
+
+# NOT: KillMode=none KASITLI OLARAK kullanılmadı — modern systemd'de bu ayar
+# orphan (sahipsiz) süreçler bırakabilir ve resmi olarak önerilmiyor/bazı
+# sürümlerde kaldırıldı. Varsayılan KillMode=control-group zaten doğru ve
+# güvenli davranıştır, değiştirilmemeli.
+#
+# NOT: "Amatör kullanıcı durduramasın" gereksinimi systemd'de zaten varsayılan
+# olarak sağlanır: bu sistem genelinde (system-wide, --user DEĞİL) bir unit
+# olduğu için `systemctl stop devmonitor` çalıştırmak root/sudo veya polkit
+# yetkisi gerektirir — yetkisiz bir kullanıcı "Interactive authentication
+# required" / "Access denied" hatası alır. Bunu doğrulamak için yetkisiz bir
+# oturumdan: `systemctl stop devmonitor` (sudo OLMADAN) deneyin.
+
+# Hafif sandboxing — agent.py sadece psutil okuyup HTTP POST attığı için
+# dosya sistemine yazma ihtiyacı yoktur, bu nedenle güvenle kısıtlanabilir.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
 
 # Kaynak sınırları (isteğe bağlı)
 # MemoryMax=128M

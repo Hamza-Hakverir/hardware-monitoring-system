@@ -157,6 +157,9 @@ CACHES = {
     }
 }
 
+# DevMonitor — Ham heartbeat arşivi (dosya sistemi, JSONL)
+ARCHIVE_DIR = Path(os.getenv('ARCHIVE_DIR', str(BASE_DIR / 'archive')))
+
 # DevMonitor — Alert eşik değerleri (%)
 ALERT_WARNING_THRESHOLD  = float(os.getenv('ALERT_WARNING_THRESHOLD',  '75.0'))
 ALERT_CRITICAL_THRESHOLD = float(os.getenv('ALERT_CRITICAL_THRESHOLD', '90.0'))
