@@ -257,8 +257,8 @@ DB_ENGINE=django.db.backends.postgresql
 DB_NAME=postgres
 DB_USER=kullanici_adi
 DB_PASSWORD=sifreniz
-DB_HOST=db.supabase.co
-DB_PORT=5432
+DB_HOST=aws-...pooler.supabase.com
+DB_PORT=6543
 DB_SSLMODE=require
 
 # İsteğe bağlı — CRITICAL uyarılarda e-posta bildirimi
@@ -270,6 +270,15 @@ DB_SSLMODE=require
 ```
 
 > Supabase kullanıyorsan `DB_SSLMODE=require` satırını mutlaka ekle.
+>
+> **`DB_PORT=6543` kullan, `5432` değil.** Supabase pooler'ı (Supavisor) aynı
+> host üzerinde iki modda çalışır: `5432` = **Session mode** (sadece ~15
+> eşzamanlı bağlantıya izin verir — birden fazla geliştirici/terminal/dev
+> server aynı anda bağlanınca `FATAL: max clients reached` hatası verir),
+> `6543` = **Transaction mode** (çok daha fazla eşzamanlı istemciyi
+> multiplexleyerek destekler, Django uygulamaları için önerilen mod). Bu proje
+> bu hatayı 5432 ile gerçekten yaşadı — `.env` dosyanız git'e gitmediği için
+> bu değişikliği **her geliştirici kendi `.env`'inde** yapmalı.
 
 ### 3. Tabloları oluştur
 

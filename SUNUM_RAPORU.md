@@ -483,6 +483,7 @@ Yapışık (sticky) bölüm menüsü ile 6 ana bölüme hızlı geçiş:
 | Admin panelinde 4 model görünmüyordu | `Tag`, `DeviceThreshold`, `DeviceStatusLog` admin.py'e eklendi |
 | `install_service.py`'deki `_sc()` Türkçe Windows konsolunda `sc.exe` çıktısını decode ederken çöküyordu (`secure` komutunu da kırıyordu) | `subprocess.run(..., errors='replace')` + yazdırma sırasında ASCII fallback eklendi |
 | Arşiv listeleme/indirme API'si eklenirken `mac_address`'in serbest metin olması path traversal riski oluşturuyordu | `archive._safe_mac` alfanümerik+`-` dışındaki her karakteri `_`'ye çeviriyor; `day` parametresi sıkı regex `fullmatch` ile doğrulanıyor |
+| Geliştirme sırasında Supabase'e `FATAL: max clients reached` hatası alındı (`DB_PORT=5432` = Session mode, sadece ~15 eşzamanlı bağlantı) | `.env`'de `DB_PORT=6543`'e (Transaction mode pooler) geçildi — `select_for_update` içeren işlemler dahil tüm akış yeniden test edildi |
 
 ---
 
