@@ -89,7 +89,8 @@
     <h5 class="dm-section-title"><i class="bi bi-speedometer2 me-2"></i>Genel Durum</h5>
     <div class="row g-3 mb-3">
         <div class="col-6 col-md">
-            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+            <div class="card dm-card h-100" data-bs-toggle="tooltip" data-bs-placement="top" title="Toplam CPU kullanımı — %100 işlemci tamamen dolu demektir.">
+            <div class="card-body text-center py-3">
                 <i class="bi bi-cpu text-primary" style="font-size:1.5rem"></i>
                 <h3 class="fw-bold mt-1 mb-0" id="cpuValue" style="color:var(--dm-primary)">%{{ latest_hb.cpu_percent|floatformat:1|default:"—" }}</h3>
                 <p class="text-muted mb-1" style="font-size:.75rem">CPU</p>
@@ -97,7 +98,8 @@
             </div></div>
         </div>
         <div class="col-6 col-md">
-            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+            <div class="card dm-card h-100" data-bs-toggle="tooltip" data-bs-placement="top" title="Kullanılan RAM yüzdesi.">
+            <div class="card-body text-center py-3">
                 <i class="bi bi-memory" style="font-size:1.5rem;color:var(--dm-info)"></i>
                 <h3 class="fw-bold mt-1 mb-0" id="ramValue" style="color:var(--dm-info)">%{{ latest_hb.ram_percent|floatformat:1|default:"—" }}</h3>
                 <p class="text-muted mb-1" style="font-size:.75rem">RAM</p>
@@ -105,7 +107,8 @@
             </div></div>
         </div>
         <div class="col-6 col-md">
-            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+            <div class="card dm-card h-100" data-bs-toggle="tooltip" data-bs-placement="top" title="Sistem diskinin doluluk yüzdesi.">
+            <div class="card-body text-center py-3">
                 <i class="bi bi-hdd" style="font-size:1.5rem;color:var(--dm-warning)"></i>
                 <h3 class="fw-bold mt-1 mb-0" id="diskValue" style="color:#e6a817">%{{ latest_hb.disk_percent|floatformat:1|default:"—" }}</h3>
                 <p class="text-muted mb-1" style="font-size:.75rem">Disk</p>
@@ -113,7 +116,9 @@
             </div></div>
         </div>
         <div class="col-6 col-md">
-            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+            <div class="card dm-card h-100" data-bs-toggle="tooltip" data-bs-placement="top"
+                 title="{% if latest_hb.battery_percent != None %}Batarya seviyesi ve şarj durumu.{% else %}Masaüstü cihaz — batarya yok, bunun yerine çalışan süreç sayısı gösterilir.{% endif %}">
+            <div class="card-body text-center py-3">
                 {% if latest_hb.battery_percent != None %}
                 <i class="bi bi-{% if latest_hb.battery_plugged %}plug{% else %}battery-half{% endif %}" style="font-size:1.5rem;color:var(--dm-success)"></i>
                 <h3 class="fw-bold mt-1 mb-0" style="color:var(--dm-success)">%{{ latest_hb.battery_percent|floatformat:0 }}</h3>
@@ -128,7 +133,8 @@
         </div>
         {% if latest_hb.battery_percent != None %}
         <div class="col-6 col-md">
-            <div class="card dm-card h-100"><div class="card-body text-center py-3">
+            <div class="card dm-card h-100" data-bs-toggle="tooltip" data-bs-placement="top" title="Sistemde o an çalışan toplam süreç sayısı.">
+            <div class="card-body text-center py-3">
                 <i class="bi bi-diagram-3" style="font-size:1.5rem;color:#6f42c1"></i>
                 <h3 class="fw-bold mt-1 mb-0" id="processValue" style="color:#6f42c1">{{ latest_hb.process_count|default:"—" }}</h3>
                 <p class="text-muted mb-1" style="font-size:.75rem">Süreç</p>
@@ -205,12 +211,20 @@
             <div class="label">Sıcaklık</div><div class="value" style="color:{% if latest_hb.cpu_temperature >= 80 %}var(--dm-danger){% elif latest_hb.cpu_temperature >= 60 %}var(--dm-warning){% else %}var(--dm-success){% endif %}">{{ latest_hb.cpu_temperature|floatformat:1 }}°C</div></div>
         {% endif %}
     </div>
-    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-activity me-2"></i>CPU Yükü</h6></div>
+    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem">
+        <i class="bi bi-activity me-2"></i>CPU Yükü
+        <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.7rem" data-bs-toggle="tooltip"
+           title="Canlı özetteki (live_metrics.recent) son ≤10 noktayı gösterir; 15sn'de bir AJAX ile güncellenir."></i>
+    </h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="cpuChart" height="80"></canvas></div></div>
 
     {% if latest_hb.cpu_per_core %}
     <div class="card dm-card mt-3">
-        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-grid me-2"></i>Çekirdek Başına Kullanım</h6></div>
+        <div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem">
+            <i class="bi bi-grid me-2"></i>Çekirdek Başına Kullanım
+            <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.7rem" data-bs-toggle="tooltip"
+               title="Her çekirdeğin ayrı yük durumu. Bir çekirdek %100 iken diğerleri boşsa, program çok çekirdekli işlemi kullanamıyor demektir."></i>
+        </h6></div>
         <div class="card-body py-3">
             <div class="d-flex flex-wrap gap-2" id="coreGrid">
                 {% for pct in latest_hb.cpu_per_core %}
@@ -251,11 +265,19 @@
             </div>
         </div>
         <div class="col-md-5">
-            <div class="card dm-card h-100"><div class="card-header"><h6 class="mb-0 fw-bold"><i class="bi bi-pie-chart me-2"></i>Bellek Dağılımı</h6></div>
+            <div class="card dm-card h-100"><div class="card-header"><h6 class="mb-0 fw-bold">
+                <i class="bi bi-pie-chart me-2"></i>Bellek Dağılımı
+                <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.75rem" data-bs-toggle="tooltip"
+                   title="Toplam fiziksel bellek; Kullanılan + Önbellek + Kullanılabilir'in toplamı genelde toplam belleğe yakındır."></i>
+            </h6></div>
             <div class="card-body d-flex align-items-center justify-content-center"><canvas id="memDoughnut" style="max-height:180px"></canvas></div></div>
         </div>
     </div>
-    <div class="card dm-card mt-3"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-activity me-2"></i>Bellek Yoğunluğu</h6></div>
+    <div class="card dm-card mt-3"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem">
+        <i class="bi bi-activity me-2"></i>Bellek Yoğunluğu
+        <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.7rem" data-bs-toggle="tooltip"
+           title="RAM kullanım yüzdesinin son ≤10 ölçümlük canlı seyri."></i>
+    </h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="memChart" height="80"></canvas></div></div>
 </div>
 
@@ -272,7 +294,11 @@
         <div class="dm-info-item" data-bs-toggle="tooltip" title="Sistem açılışından bu yana diske yazılmış toplam veri (kümülatif).">
             <div class="label">Toplam Yazılan</div><div class="value" style="color:var(--dm-primary)">{{ latest_hb.disk_write_bytes|default:0|filesizeformat }}</div></div>
     </div>
-    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Disk Giriş/Çıkış</h6></div>
+    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem">
+        <i class="bi bi-arrow-down-up me-2"></i>Disk Giriş/Çıkış
+        <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.7rem" data-bs-toggle="tooltip"
+           title="Kümülatif okunan/yazılan byte'lardan hesaplanan, ardışık ölçümler arası FARK (yani anlık hız)."></i>
+    </h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="diskChart" height="90"></canvas></div></div>
 
     {% if latest_hb.disk_partitions %}
@@ -336,7 +362,11 @@
         <div class="dm-info-item" data-bs-toggle="tooltip" title="Ağa gönderilen paket sayısı.">
             <div class="label">Giden Paket</div><div class="value">{{ latest_hb.net_packets_sent|default:0 }}</div></div>
     </div>
-    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem"><i class="bi bi-arrow-down-up me-2"></i>Ağ Giriş/Çıkış</h6></div>
+    <div class="card dm-card"><div class="card-header py-2"><h6 class="mb-0 fw-bold" style="font-size:.85rem">
+        <i class="bi bi-arrow-down-up me-2"></i>Ağ Giriş/Çıkış
+        <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.7rem" data-bs-toggle="tooltip"
+           title="Kümülatif gönderilen/alınan byte'lardan hesaplanan, ardışık ölçümler arası FARK (yani anlık hız)."></i>
+    </h6></div>
     <div class="card-body" style="padding:.5rem"><canvas id="netChart" height="90"></canvas></div></div>
 
     {% if latest_hb.net_per_nic %}

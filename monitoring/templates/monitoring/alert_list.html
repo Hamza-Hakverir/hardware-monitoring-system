@@ -27,8 +27,10 @@
                     <tr>
                         <th class="px-4 py-3">Tarih</th>
                         <th class="py-3">Cihaz</th>
-                        <th class="py-3">Tür</th>
-                        <th class="py-3">Şiddet</th>
+                        <th class="py-3" data-bs-toggle="tooltip" style="cursor:help"
+                            title="CPU_HIGH/RAM_HIGH/DISK_FULL: eşik aşımı. CPU_ANOMALY/RAM_ANOMALY: anlık değer, son ölçümlerin ortalamasının 2 katını aşınca tetiklenir.">Tür</th>
+                        <th class="py-3" data-bs-toggle="tooltip" style="cursor:help"
+                            title="Uyarı: warning eşiği aşıldı. Kritik: critical eşiği aşıldı + (ayarlıysa) admin'e e-posta gönderilir.">Şiddet</th>
                         <th class="py-3">Mesaj</th>
                         <th class="py-3">Durum</th>
                         <th class="py-3 text-end px-4">İşlem</th>

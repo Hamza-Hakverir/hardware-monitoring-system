@@ -67,7 +67,10 @@
     <div class="col-md-5 dm-animate dm-animate-delay-2">
         <div class="card dm-card h-100">
             <div class="card-header">
-                <h6><i class="bi bi-pie-chart me-2"></i>Cihaz Durumu Dağılımı</h6>
+                <h6><i class="bi bi-pie-chart me-2"></i>Cihaz Durumu Dağılımı
+                    <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.75rem" data-bs-toggle="tooltip"
+                       title="15sn'de bir AJAX ile /dashboard/stats/ çağrılarak güncellenir."></i>
+                </h6>
             </div>
             <div class="card-body d-flex align-items-center justify-content-center">
                 <canvas id="deviceStatusChart" style="max-height: 250px;"></canvas>
@@ -77,7 +80,10 @@
     <div class="col-md-7 dm-animate dm-animate-delay-3">
         <div class="card dm-card h-100">
             <div class="card-header">
-                <h6><i class="bi bi-bar-chart me-2"></i>Son Uyarı Türleri</h6>
+                <h6><i class="bi bi-bar-chart me-2"></i>Son Uyarı Türleri
+                    <i class="bi bi-info-circle ms-1 text-muted" style="cursor:help;font-size:.75rem" data-bs-toggle="tooltip"
+                       title="Sadece ÇÖZÜLMEMİŞ (beklemede) uyarıların türe göre dağılımı."></i>
+                </h6>
             </div>
             <div class="card-body">
                 <canvas id="alertTypeChart" style="max-height: 250px;"></canvas>
